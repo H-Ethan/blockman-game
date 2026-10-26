@@ -34,7 +34,7 @@
   .swatch.sel { outline:3px solid var(--accent); outline-offset:2px; }
   .game { display:grid; grid-template-columns: 1fr 240px; gap:16px; }
   @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
-  #stage { width:100%; border:3px solid var(--line); background:#fffdf7; image-rendering: pixelated; display:block; }
+  #stage { width:100%; height:auto; border:3px solid var(--line); background:#101a26; display:block; border-radius:6px; }
   .board li { display:flex; align-items:center; gap:8px; padding:4px 0; }
   .board img { width:12px; height:24px; image-rendering:pixelated; }
   .board ol { padding-left:20px; margin:8px 0; }
@@ -91,7 +91,7 @@
         <canvas id="previewCanvas" width="24" height="48" style="width:96px;height:192px"></canvas>
         <input type="text" id="nameInput" maxlength="12" placeholder="輸入暱稱">
         <button class="primary" id="joinBtn" style="width:100%">開始遊戲 ▶</button>
-        <p class="hint">方向鍵 / WASD 移動，搶到 10 顆星星獲勝！</p>
+        <p class="hint">方向鍵 / WASD 移動，繞過樹木、牆壁和石頭，搶到 10 顆星星獲勝！</p>
       </div>
     </div>
   </div>
@@ -101,7 +101,7 @@
 <div class="wrap hidden" id="gameScreen">
   <div class="game">
     <div>
-      <canvas id="stage" width="800" height="500"></canvas>
+      <canvas id="stage" width="960" height="726"></canvas>
       <div class="pad" id="pad">
         <span></span><button data-k="up">▲</button><span></span>
         <button data-k="left">◀</button><button data-k="down">▼</button><button data-k="right">▶</button>
@@ -119,6 +119,7 @@
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const SW = 24, SH = 48;          // 角色圖尺寸
@@ -239,10 +240,9 @@ $('tabDraw').onclick = () => setMode('draw');
 redrawGrid(); setMode('block');
 try { $('nameInput').value = localStorage.getItem('bm_name') || ''; } catch (e) {}
 
-// ---------- 連線與遊戲 ----------
+// ---------- 連線與遊戲（畫面由 game.js 負責） ----------
 const socket = io();
-const stage = $('stage'), sctx = stage.getContext('2d');
-let myId = null, cfg = null, state = null, sprites = {}, imgCache = {};
+let myId = null, sprites = {}, lastState = null;
 const keys = { up: false, down: false, left: false, right: false };
 
 $('joinBtn').onclick = () => {
@@ -254,18 +254,15 @@ $('joinBtn').onclick = () => {
   socket.emit('join', { name, sprite: c.toDataURL('image/png') });
 };
 socket.on('joined', d => {
-  myId = d.id; cfg = d;
+  myId = d.id;
   $('editorScreen').classList.add('hidden'); $('gameScreen').classList.remove('hidden');
   $('status').textContent = '遊戲中 — 搶星星！';
+  Game.start(d, d.id);
 });
 socket.on('errorMsg', m => alert(m));
-socket.on('sprites', map => {
-  sprites = map;
-  for (const [id, s] of Object.entries(map)) {
-    if (!imgCache[id] || imgCache[id].src !== s.sprite) { const im = new Image(); im.src = s.sprite; imgCache[id] = im; }
-  }
-});
-socket.on('state', s => { state = s; updateBoard(); });
+socket.on('map', m => Game.setMap(m));
+socket.on('sprites', map => { sprites = map; Game.setSprites(map); });
+socket.on('state', s => { lastState = s; Game.setState(s); updateBoard(); });
 socket.on('chat', m => {
   const div = document.createElement('div');
   const b = document.createElement('b'); b.textContent = m.name + '：';
@@ -285,6 +282,7 @@ addEventListener('keydown', e => {
   if (KEYMAP[e.code]) { e.preventDefault(); setKey(KEYMAP[e.code], true); }
 });
 addEventListener('keyup', e => { if (KEYMAP[e.code]) setKey(KEYMAP[e.code], false); });
+addEventListener('blur', () => Object.keys(keys).forEach(k => setKey(k, false)));
 // 觸控方向鍵
 document.querySelectorAll('#pad button').forEach(b => {
   const k = b.dataset.k;
@@ -293,7 +291,7 @@ document.querySelectorAll('#pad button').forEach(b => {
 });
 
 function updateBoard() {
-  const list = [...state.players].sort((a, b) => b.score - a.score);
+  const list = [...lastState.players].sort((a, b) => b.score - a.score);
   $('scoreList').innerHTML = '';
   for (const p of list) {
     const li = document.createElement('li');
@@ -303,52 +301,6 @@ function updateBoard() {
     li.append(im, t); $('scoreList').appendChild(li);
   }
 }
-
-function drawStar(x, y, r) {
-  sctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
-    sctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
-  }
-  sctx.closePath(); sctx.fillStyle = '#ffd60a'; sctx.fill(); sctx.strokeStyle = '#222'; sctx.lineWidth = 2; sctx.stroke();
-}
-
-function frame(t) {
-  requestAnimationFrame(frame);
-  if (!state || !cfg) return;
-  sctx.imageSmoothingEnabled = false;
-  sctx.fillStyle = '#fffdf7'; sctx.fillRect(0, 0, stage.width, stage.height);
-  sctx.strokeStyle = '#eee'; sctx.lineWidth = 1;
-  for (let x = 0; x < stage.width; x += 40) { sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, stage.height); sctx.stroke(); }
-  for (let y = 0; y < stage.height; y += 40) { sctx.beginPath(); sctx.moveTo(0, y); sctx.lineTo(stage.width, y); sctx.stroke(); }
-
-  const pulse = 9 + Math.sin(t / 200) * 1.5;
-  state.stars.forEach(s => drawStar(s.x, s.y, pulse));
-
-  for (const p of [...state.players].sort((a, b) => a.y - b.y)) {
-    const im = imgCache[p.id];
-    sctx.fillStyle = 'rgba(0,0,0,.15)';
-    sctx.beginPath(); sctx.ellipse(p.x + cfg.PW / 2, p.y + cfg.PH + 2, 14, 4, 0, 0, Math.PI * 2); sctx.fill();
-    if (im && im.complete) {
-      sctx.save();
-      if (p.facing < 0) { sctx.translate(p.x + cfg.PW, p.y); sctx.scale(-1, 1); sctx.drawImage(im, 0, 0, cfg.PW, cfg.PH); }
-      else sctx.drawImage(im, p.x, p.y, cfg.PW, cfg.PH);
-      sctx.restore();
-    }
-    const name = sprites[p.id] ? sprites[p.id].name : '';
-    sctx.font = 'bold 13px system-ui'; sctx.textAlign = 'center';
-    sctx.fillStyle = p.id === myId ? '#ff5a5f' : '#222';
-    sctx.fillText(`${name} ${p.score}`, p.x + cfg.PW / 2, p.y - 6);
-  }
-
-  if (state.winner) {
-    sctx.fillStyle = 'rgba(0,0,0,.55)'; sctx.fillRect(0, 0, stage.width, stage.height);
-    sctx.fillStyle = '#fff'; sctx.textAlign = 'center';
-    sctx.font = 'bold 44px system-ui'; sctx.fillText(`🏆 ${state.winner} 獲勝！`, stage.width / 2, stage.height / 2);
-    sctx.font = '18px system-ui'; sctx.fillText('新回合即將開始…', stage.width / 2, stage.height / 2 + 36);
-  }
-}
-requestAnimationFrame(frame);
 </script>
 </body>
 </html>
