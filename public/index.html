@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色塊人大亂鬥</title>
+<style>
+  :root { --bg:#f4f1ea; --ink:#222; --card:#fff; --line:#222; --accent:#ff5a5f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Noto Sans TC", system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 16px; border-bottom:3px solid var(--line); background:var(--card); display:flex; align-items:center; gap:12px; }
+  header h1 { margin:0; font-size:22px; letter-spacing:1px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:3px solid var(--line); padding:16px; }
+  .hidden { display:none !important; }
+  button { font:inherit; border:2px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
+  button:hover { background:#eee; }
+  button.primary { background:var(--accent); color:#fff; font-weight:bold; }
+  button.on { background:var(--ink); color:#fff; }
+  input[type=text] { font:inherit; border:2px solid var(--line); padding:8px; width:100%; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .editor { display:grid; grid-template-columns: 1fr 260px; gap:16px; }
+  @media (max-width:760px){ .editor { grid-template-columns: 1fr; } }
+  .row { display:flex; align-items:center; gap:10px; margin:10px 0; flex-wrap:wrap; }
+  .row label { min-width:64px; font-weight:bold; }
+  input[type=color] { width:48px; height:36px; border:2px solid var(--line); padding:0; background:none; }
+  .preview { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .preview canvas { image-rendering: pixelated; border:3px solid var(--line); background:
+    repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/16px 16px; }
+  #drawCanvas { image-rendering: pixelated; border:3px solid var(--line); touch-action:none; cursor:crosshair; max-width:100%;
+    background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/40px 40px; }
+  .palette { display:flex; flex-wrap:wrap; gap:6px; }
+  .swatch { width:28px; height:28px; border:2px solid var(--line); cursor:pointer; }
+  .swatch.sel { outline:3px solid var(--accent); outline-offset:2px; }
+  .game { display:grid; grid-template-columns: 1fr 240px; gap:16px; }
+  @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
+  #stage { width:100%; border:3px solid var(--line); background:#fffdf7; image-rendering: pixelated; display:block; }
+  .board li { display:flex; align-items:center; gap:8px; padding:4px 0; }
+  .board img { width:12px; height:24px; image-rendering:pixelated; }
+  .board ol { padding-left:20px; margin:8px 0; }
+  #chatLog { height:160px; overflow:auto; border:2px solid var(--line); padding:6px; font-size:14px; background:#fafafa; }
+  .pad { display:grid; grid-template-columns: repeat(3, 56px); gap:6px; justify-content:center; margin-top:12px; user-select:none; }
+  .pad button { height:56px; font-size:22px; touch-action:none; }
+  .hint { color:#666; font-size:14px; }
+</style>
+</head>
+<body>
+<header><h1>■ 色塊人大亂鬥</h1><span class="hint" id="status">設計你的角色</span></header>
+
+<!-- ===== 角色編輯器 ===== -->
+<div class="wrap" id="editorScreen">
+  <div class="card">
+    <div class="tabs">
+      <button id="tabBlock" class="on">色塊模式</button>
+      <button id="tabDraw">手繪模式</button>
+    </div>
+    <div class="editor">
+      <div>
+        <!-- 色塊模式 -->
+        <div id="blockPanel">
+          <div class="row"><label>頭</label><input type="color" id="cHead" value="#f9c78d">
+            <span class="hint">髮色</span><input type="color" id="cHair" value="#222222">
+            <input type="checkbox" id="hasHair" checked><span class="hint">顯示頭髮</span></div>
+          <div class="row"><label>身體</label><input type="color" id="cBody" value="#ff5a5f">
+            <span class="hint">條紋</span><input type="color" id="cStripe" value="#ffffff">
+            <input type="checkbox" id="hasStripe"><span class="hint">顯示條紋</span></div>
+          <div class="row"><label>腳</label><input type="color" id="cFeet" value="#2b59c3">
+            <span class="hint">鞋子</span><input type="color" id="cShoe" value="#222222"></div>
+          <div class="row"><label>頭部比例</label><input type="range" id="rHead" min="6" max="18" value="11"></div>
+          <div class="row"><label>腳部比例</label><input type="range" id="rFeet" min="4" max="20" value="12"></div>
+          <div class="row"><button id="randomBtn">🎲 隨機</button></div>
+        </div>
+        <!-- 手繪模式 -->
+        <div id="drawPanel" class="hidden">
+          <div class="row">
+            <div class="palette" id="palette"></div>
+            <input type="color" id="customColor" value="#8a5cf6" title="自訂顏色">
+          </div>
+          <div class="row">
+            <button id="toolPen" class="on">✏️ 畫筆</button>
+            <button id="toolEraser">🧽 橡皮擦</button>
+            <button id="toolFill">🪣 填滿</button>
+            <button id="importBlock">從色塊模式匯入</button>
+            <button id="clearDraw">清空</button>
+          </div>
+          <canvas id="drawCanvas" width="240" height="480"></canvas>
+          <p class="hint">12 × 24 像素畫布，畫好後右側即時預覽。</p>
+        </div>
+      </div>
+      <div class="preview">
+        <canvas id="previewCanvas" width="24" height="48" style="width:96px;height:192px"></canvas>
+        <input type="text" id="nameInput" maxlength="12" placeholder="輸入暱稱">
+        <button class="primary" id="joinBtn" style="width:100%">開始遊戲 ▶</button>
+        <p class="hint">方向鍵 / WASD 移動，搶到 10 顆星星獲勝！</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 遊戲畫面 ===== -->
+<div class="wrap hidden" id="gameScreen">
+  <div class="game">
+    <div>
+      <canvas id="stage" width="800" height="500"></canvas>
+      <div class="pad" id="pad">
+        <span></span><button data-k="up">▲</button><span></span>
+        <button data-k="left">◀</button><button data-k="down">▼</button><button data-k="right">▶</button>
+      </div>
+    </div>
+    <div class="card board">
+      <strong>排行榜</strong>
+      <ol id="scoreList"></ol>
+      <strong>聊天</strong>
+      <div id="chatLog"></div>
+      <input type="text" id="chatInput" maxlength="80" placeholder="按 Enter 送出">
+      <button id="backBtn" style="margin-top:10px;width:100%">換角色</button>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const SW = 24, SH = 48;          // 角色圖尺寸
+const GW = 12, GH = 24;          // 手繪格數（每格 2×2 像素）
+let mode = 'block';
+
+// ---------- 色塊模式 ----------
+function renderBlock(ctx) {
+  ctx.clearRect(0, 0, SW, SH);
+  const headH = +$('rHead').value, feetH = +$('rFeet').value;
+  const bodyH = SH - headH - feetH;
+  const x = 2, w = SW - 4;
+  // 頭
+  ctx.fillStyle = $('cHead').value; ctx.fillRect(x, 0, w, headH);
+  if ($('hasHair').checked) { ctx.fillStyle = $('cHair').value; ctx.fillRect(x, 0, w, Math.max(2, Math.round(headH * 0.3))); }
+  // 身體
+  ctx.fillStyle = $('cBody').value; ctx.fillRect(x, headH, w, bodyH);
+  if ($('hasStripe').checked) { ctx.fillStyle = $('cStripe').value; ctx.fillRect(x, headH + Math.floor(bodyH / 2) - 1, w, 3); }
+  // 腳
+  ctx.fillStyle = $('cFeet').value; ctx.fillRect(x, headH + bodyH, w, feetH);
+  ctx.fillStyle = $('cShoe').value; ctx.fillRect(x, SH - 3, w, 3);
+  // 外框
+  ctx.fillStyle = '#222';
+  ctx.fillRect(x - 1, 0, 1, SH); ctx.fillRect(x + w, 0, 1, SH);
+}
+document.querySelectorAll('#blockPanel input').forEach(el => el.addEventListener('input', updatePreview));
+const rndColor = () => '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+$('randomBtn').onclick = () => {
+  ['cHair', 'cBody', 'cStripe', 'cFeet', 'cShoe'].forEach(id => $(id).value = rndColor());
+  $('cHead').value = ['#f9c78d', '#e8b07a', '#c68642', '#8d5524', '#ffdbac'][Math.floor(Math.random() * 5)];
+  $('hasStripe').checked = Math.random() < 0.5;
+  $('rHead').value = 7 + Math.floor(Math.random() * 10);
+  $('rFeet').value = 5 + Math.floor(Math.random() * 14);
+  updatePreview();
+};
+
+// ---------- 手繪模式 ----------
+const grid = Array.from({ length: GH }, () => Array(GW).fill(null));
+const COLORS = ['#222222', '#ffffff', '#f9c78d', '#8d5524', '#ff5a5f', '#ff9f1c', '#ffe066', '#7bd389',
+                '#2a9d8f', '#4cc9f0', '#2b59c3', '#8a5cf6', '#ff8fab', '#6b4f3a', '#9e9e9e', '#1b5e20'];
+let curColor = COLORS[4], tool = 'pen', painting = false;
+const dc = $('drawCanvas'), dctx = dc.getContext('2d');
+const CELL = dc.width / GW;
+
+COLORS.forEach(c => {
+  const s = document.createElement('div');
+  s.className = 'swatch' + (c === curColor ? ' sel' : ''); s.style.background = c;
+  s.onclick = () => { curColor = c; selectTool('pen'); markSwatch(s); };
+  $('palette').appendChild(s);
+});
+function markSwatch(el) { document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('sel', s === el)); }
+$('customColor').oninput = e => { curColor = e.target.value; selectTool('pen'); markSwatch(null); };
+function selectTool(t) { tool = t; ['Pen', 'Eraser', 'Fill'].forEach(n => $('tool' + n).classList.toggle('on', t === n.toLowerCase())); }
+$('toolPen').onclick = () => selectTool('pen');
+$('toolEraser').onclick = () => selectTool('eraser');
+$('toolFill').onclick = () => selectTool('fill');
+$('clearDraw').onclick = () => { grid.forEach(r => r.fill(null)); redrawGrid(); };
+$('importBlock').onclick = () => {
+  const c = document.createElement('canvas'); c.width = SW; c.height = SH;
+  const cx = c.getContext('2d'); renderBlock(cx);
+  const d = cx.getImageData(0, 0, SW, SH).data;
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const i = ((y * 2) * SW + x * 2) * 4;
+    grid[y][x] = d[i + 3] > 0 ? '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('') : null;
+  }
+  redrawGrid();
+};
+
+function redrawGrid() {
+  dctx.clearRect(0, 0, dc.width, dc.height);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    if (grid[y][x]) { dctx.fillStyle = grid[y][x]; dctx.fillRect(x * CELL, y * CELL, CELL, CELL); }
+  }
+  dctx.strokeStyle = 'rgba(0,0,0,.12)';
+  for (let x = 0; x <= GW; x++) { dctx.beginPath(); dctx.moveTo(x * CELL, 0); dctx.lineTo(x * CELL, dc.height); dctx.stroke(); }
+  for (let y = 0; y <= GH; y++) { dctx.beginPath(); dctx.moveTo(0, y * CELL); dctx.lineTo(dc.width, y * CELL); dctx.stroke(); }
+  updatePreview();
+}
+function floodFill(sx, sy, color) {
+  const target = grid[sy][sx]; if (target === color) return;
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || y < 0 || x >= GW || y >= GH || grid[y][x] !== target) continue;
+    grid[y][x] = color; stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+}
+function paintAt(e) {
+  const r = dc.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / r.width * GW), y = Math.floor((e.clientY - r.top) / r.height * GH);
+  if (x < 0 || y < 0 || x >= GW || y >= GH) return;
+  if (tool === 'fill') floodFill(x, y, curColor);
+  else grid[y][x] = tool === 'eraser' ? null : curColor;
+  redrawGrid();
+}
+dc.addEventListener('pointerdown', e => { painting = tool !== 'fill'; dc.setPointerCapture(e.pointerId); paintAt(e); });
+dc.addEventListener('pointermove', e => { if (painting) paintAt(e); });
+dc.addEventListener('pointerup', () => painting = false);
+
+function renderDraw(ctx) {
+  ctx.clearRect(0, 0, SW, SH);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    if (grid[y][x]) { ctx.fillStyle = grid[y][x]; ctx.fillRect(x * 2, y * 2, 2, 2); }
+  }
+}
+
+// ---------- 預覽 / 模式切換 ----------
+const pctx = $('previewCanvas').getContext('2d');
+function updatePreview() { mode === 'block' ? renderBlock(pctx) : renderDraw(pctx); }
+function setMode(m) {
+  mode = m;
+  $('tabBlock').classList.toggle('on', m === 'block'); $('tabDraw').classList.toggle('on', m === 'draw');
+  $('blockPanel').classList.toggle('hidden', m !== 'block'); $('drawPanel').classList.toggle('hidden', m !== 'draw');
+  if (m === 'draw' && grid.every(r => r.every(c => !c))) $('importBlock').onclick(); else updatePreview();
+}
+$('tabBlock').onclick = () => setMode('block');
+$('tabDraw').onclick = () => setMode('draw');
+redrawGrid(); setMode('block');
+try { $('nameInput').value = localStorage.getItem('bm_name') || ''; } catch (e) {}
+
+// ---------- 連線與遊戲 ----------
+const socket = io();
+const stage = $('stage'), sctx = stage.getContext('2d');
+let myId = null, cfg = null, state = null, sprites = {}, imgCache = {};
+const keys = { up: false, down: false, left: false, right: false };
+
+$('joinBtn').onclick = () => {
+  if (mode === 'draw' && grid.every(r => r.every(c => !c))) { alert('角色是空白的，先畫點東西吧！'); return; }
+  const c = document.createElement('canvas'); c.width = SW; c.height = SH;
+  mode === 'block' ? renderBlock(c.getContext('2d')) : renderDraw(c.getContext('2d'));
+  const name = $('nameInput').value.trim() || '玩家' + Math.floor(Math.random() * 1000);
+  try { localStorage.setItem('bm_name', name); } catch (e) {}
+  socket.emit('join', { name, sprite: c.toDataURL('image/png') });
+};
+socket.on('joined', d => {
+  myId = d.id; cfg = d;
+  $('editorScreen').classList.add('hidden'); $('gameScreen').classList.remove('hidden');
+  $('status').textContent = '遊戲中 — 搶星星！';
+});
+socket.on('errorMsg', m => alert(m));
+socket.on('sprites', map => {
+  sprites = map;
+  for (const [id, s] of Object.entries(map)) {
+    if (!imgCache[id] || imgCache[id].src !== s.sprite) { const im = new Image(); im.src = s.sprite; imgCache[id] = im; }
+  }
+});
+socket.on('state', s => { state = s; updateBoard(); });
+socket.on('chat', m => {
+  const div = document.createElement('div');
+  const b = document.createElement('b'); b.textContent = m.name + '：';
+  div.append(b, document.createTextNode(m.text));
+  $('chatLog').appendChild(div); $('chatLog').scrollTop = 1e9;
+});
+$('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.value.trim()) { socket.emit('chat', e.target.value); e.target.value = ''; }
+});
+$('backBtn').onclick = () => location.reload();
+
+// 鍵盤
+const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+function setKey(k, v) { if (keys[k] !== v) { keys[k] = v; socket.emit('input', keys); } }
+addEventListener('keydown', e => {
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  if (KEYMAP[e.code]) { e.preventDefault(); setKey(KEYMAP[e.code], true); }
+});
+addEventListener('keyup', e => { if (KEYMAP[e.code]) setKey(KEYMAP[e.code], false); });
+// 觸控方向鍵
+document.querySelectorAll('#pad button').forEach(b => {
+  const k = b.dataset.k;
+  b.addEventListener('pointerdown', e => { e.preventDefault(); setKey(k, true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, () => setKey(k, false)));
+});
+
+function updateBoard() {
+  const list = [...state.players].sort((a, b) => b.score - a.score);
+  $('scoreList').innerHTML = '';
+  for (const p of list) {
+    const li = document.createElement('li');
+    const im = document.createElement('img'); if (sprites[p.id]) im.src = sprites[p.id].sprite;
+    const t = document.createElement('span');
+    t.textContent = `${sprites[p.id] ? sprites[p.id].name : '?'}${p.id === myId ? '（你）' : ''} — ${p.score}`;
+    li.append(im, t); $('scoreList').appendChild(li);
+  }
+}
+
+function drawStar(x, y, r) {
+  sctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+    sctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  sctx.closePath(); sctx.fillStyle = '#ffd60a'; sctx.fill(); sctx.strokeStyle = '#222'; sctx.lineWidth = 2; sctx.stroke();
+}
+
+function frame(t) {
+  requestAnimationFrame(frame);
+  if (!state || !cfg) return;
+  sctx.imageSmoothingEnabled = false;
+  sctx.fillStyle = '#fffdf7'; sctx.fillRect(0, 0, stage.width, stage.height);
+  sctx.strokeStyle = '#eee'; sctx.lineWidth = 1;
+  for (let x = 0; x < stage.width; x += 40) { sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, stage.height); sctx.stroke(); }
+  for (let y = 0; y < stage.height; y += 40) { sctx.beginPath(); sctx.moveTo(0, y); sctx.lineTo(stage.width, y); sctx.stroke(); }
+
+  const pulse = 9 + Math.sin(t / 200) * 1.5;
+  state.stars.forEach(s => drawStar(s.x, s.y, pulse));
+
+  for (const p of [...state.players].sort((a, b) => a.y - b.y)) {
+    const im = imgCache[p.id];
+    sctx.fillStyle = 'rgba(0,0,0,.15)';
+    sctx.beginPath(); sctx.ellipse(p.x + cfg.PW / 2, p.y + cfg.PH + 2, 14, 4, 0, 0, Math.PI * 2); sctx.fill();
+    if (im && im.complete) {
+      sctx.save();
+      if (p.facing < 0) { sctx.translate(p.x + cfg.PW, p.y); sctx.scale(-1, 1); sctx.drawImage(im, 0, 0, cfg.PW, cfg.PH); }
+      else sctx.drawImage(im, p.x, p.y, cfg.PW, cfg.PH);
+      sctx.restore();
+    }
+    const name = sprites[p.id] ? sprites[p.id].name : '';
+    sctx.font = 'bold 13px system-ui'; sctx.textAlign = 'center';
+    sctx.fillStyle = p.id === myId ? '#ff5a5f' : '#222';
+    sctx.fillText(`${name} ${p.score}`, p.x + cfg.PW / 2, p.y - 6);
+  }
+
+  if (state.winner) {
+    sctx.fillStyle = 'rgba(0,0,0,.55)'; sctx.fillRect(0, 0, stage.width, stage.height);
+    sctx.fillStyle = '#fff'; sctx.textAlign = 'center';
+    sctx.font = 'bold 44px system-ui'; sctx.fillText(`🏆 ${state.winner} 獲勝！`, stage.width / 2, stage.height / 2);
+    sctx.font = '18px system-ui'; sctx.fillText('新回合即將開始…', stage.width / 2, stage.height / 2 + 36);
+  }
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
