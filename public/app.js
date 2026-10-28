@@ -35,7 +35,7 @@
       Object.keys(keys).forEach(k => keys[k] = false);
       if (z.kind === 'world') {
         zone = z.cfg.world; worldCfg = z.cfg;
-        DG.hide(); show('gameScreen');
+        DG.hide(); show('gameScreen'); boardKey = '';
         $('chatLog').innerHTML = '';
         $('zoneTitle').innerHTML = '';
         $('zoneTitle').append(z.cfg.world === 'plaza' ? '🏙️ ' : '⭐ ', z.cfg.title);
@@ -49,6 +49,7 @@
           mask: () => (keys.up ? 1 : 0) | (keys.down ? 2 : 0) | (keys.left ? 4 : 0) | (keys.right ? 8 : 0),
           send: list => socket.emit('cmds', { e: epoch, c: list })
         });
+        fitStage();
         if (pendingMap) { Game.setMap(pendingMap); pendingMap = null; }
       } else {
         zone = 'dg'; Game.stop();
@@ -94,16 +95,43 @@
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, () => keys[k] = false));
   });
 
+  // 排行榜：只在名單、分數或順序改變時才更新（以前每秒重建 30 次，連角色圖片都重新解碼，會造成卡頓）
+  const rows = new Map();
+  let boardKey = '';
   function updateBoard() {
     const list = [...lastState.players].sort((a, b) => b.score - a.score);
-    $('scoreList').innerHTML = '';
-    for (const p of list) {
-      const li = document.createElement('li');
-      const im = document.createElement('img'); if (sprites[p.id]) im.src = sprites[p.id].sprite;
-      const t = document.createElement('span');
-      const nm = sprites[p.id] ? sprites[p.id].name : '?';
-      t.textContent = `${nm}${p.id === myId ? '（你）' : ''}${zone === 'stars' ? ' — ' + p.score : ''}`;
-      li.append(im, t); $('scoreList').appendChild(li);
-    }
+    const key = zone + '|' + list.map(p => p.id + ':' + p.score + ':' + (sprites[p.id] ? 1 : 0)).join(',');
+    if (key === boardKey) return;
+    boardKey = key;
+    const ol = $('scoreList'), keep = new Set(list.map(p => p.id));
+    for (const [id, li] of rows) if (!keep.has(id)) { li.remove(); rows.delete(id); }
+    list.forEach((p, i) => {
+      let li = rows.get(p.id);
+      if (!li) {
+        li = document.createElement('li');
+        li.append(document.createElement('img'), document.createElement('span'));
+        rows.set(p.id, li);
+      }
+      const im = li.firstChild, sp = sprites[p.id];
+      if (sp && im._src !== sp.sprite) { im._src = sp.sprite; im.src = sp.sprite; }
+      const nm = sp ? sp.name : '?';
+      li.lastChild.textContent = `${nm}${p.id === myId ? '（你）' : ''}${zone === 'stars' ? ' — ' + p.score : ''}`;
+      if (ol.children[i] !== li) ol.insertBefore(li, ol.children[i] || null);
+    });
   }
+
+  // 遊戲畫面依視窗大小放到最大（整張地圖都在視窗內）
+  function fitStage() {
+    if ($('gameScreen').classList.contains('hidden')) return;
+    const wrap = $('stageWrap');
+    wrap.style.width = '100%';
+    const col = wrap.getBoundingClientRect().width;
+    const top = wrap.getBoundingClientRect().top + scrollY;
+    const availH = innerHeight - top - 12;
+    const w = Math.max(320, Math.min(col, availH * Game.aspect()));
+    wrap.style.width = Math.round(w) + 'px';
+    Game.resize();
+  }
+  let fitTimer = 0;
+  addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitStage, 120); });
 })();

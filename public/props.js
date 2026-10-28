@@ -6,7 +6,7 @@
     let a = seed >>> 0;
     return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   };
-  function mk(w, h, s = 3) {
+  function mk(w, h, s = window.Props.scale) {
     const c = document.createElement('canvas');
     c.width = Math.ceil(w * s); c.height = Math.ceil(h * s);
     const g = c.getContext('2d'); g.scale(s, s);
@@ -30,7 +30,7 @@
   function drawGuessBuilding(o) {
     const w = o.w, d = o.d, h = o.h, PX = 46, PT = 14;
     const CW = w + PX * 2, CH = PT + d + h + 4;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const r = rng(o.seed);
     const X = PX, TOP = PT, FY = PT + d, BOT = FY + h; // 正面左上角 (X, FY)
 
@@ -206,7 +206,7 @@
   // =========================================================
   function pillar(o) {
     const h = 74, P = 4, CW = o.w + P * 2, CH = o.d + h + P * 2 + 10;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const x = P, y = P + 10;
     const side = g.createLinearGradient(x, 0, x + o.w, 0);
     side.addColorStop(0, '#d9d2c3'); side.addColorStop(1, '#a89f8c');
@@ -219,7 +219,7 @@
   }
   function starGate(o) {
     const h = 74, beamH = 22, P = 30, CW = o.w + P * 2, CH = 70 + beamH;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const bx = P - 4, by = 40, bw = o.w + 8;
     g.fillStyle = '#8a7f6a'; g.fillRect(bx, by + 8, bw, beamH - 4);
     g.fillStyle = '#e6dfcf'; g.fillRect(bx, by, bw, 9);
@@ -244,7 +244,7 @@
   // =========================================================
   function lot(o) {
     const fh = 20, P = 8, CW = o.w + P * 2, CH = o.d + fh + 70;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const x = P, y = 60, r = rng(o.seed);
     // 泥土地
     g.fillStyle = '#b98a5a'; g.fillRect(x, y, o.w, o.d);
@@ -278,7 +278,7 @@
   // =========================================================
   function fountain(o) {
     const rimH = 16, P = 6, CW = o.w + P * 2, CH = o.d + rimH + 54;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const cx = P + o.w / 2, cy = 46 + o.d / 2, rx = o.w / 2, ry = o.d / 2;
     // 外緣正面
     g.fillStyle = '#9a9488'; g.beginPath(); g.ellipse(cx, cy + rimH, rx, ry, 0, 0, Math.PI); g.lineTo(cx - rx, cy); g.ellipse(cx, cy, rx, ry, 0, Math.PI, 0, true); g.fill();
@@ -305,7 +305,7 @@
   }
   function bench(o) {
     const P = 3, CW = o.w + P * 2, CH = o.d + 26;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const x = P, y = 8;
     g.fillStyle = '#3f3f46'; g.fillRect(x + 4, y + 8, 3, o.d + 10); g.fillRect(x + o.w - 7, y + 8, 3, o.d + 10);
     g.fillStyle = '#8b5a2b'; g.fillRect(x, y, o.w, 5); // 椅背
@@ -316,7 +316,7 @@
   }
   function lamp(o) {
     const CW = 24, CH = 74;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH);
     const cx = 12;
     g.fillStyle = '#2f3542'; g.fillRect(cx - 2, 18, 4, 52); g.fillRect(cx - 5, 66, 10, 5);
     g.fillStyle = '#2f3542'; g.beginPath(); g.moveTo(cx - 8, 8); g.lineTo(cx + 8, 8); g.lineTo(cx + 5, 2); g.lineTo(cx - 5, 2); g.fill();
@@ -379,5 +379,5 @@
     bed(360, 206, 76); bed(524, 206, 76);
   }
 
-  window.Props = { drawGuessBuilding, pillar, starGate, lot, fountain, bench, lamp, plazaGround, outlineText, rr, FONT };
+  window.Props = { scale: 3, drawGuessBuilding, pillar, starGate, lot, fountain, bench, lamp, plazaGround, outlineText, rr, FONT };
 })();

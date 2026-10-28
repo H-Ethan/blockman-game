@@ -55,9 +55,12 @@
   function paintLobby() {
     const cv = $('lobbyBg'); fitCanvas(cv);
     const g = cv.getContext('2d'); const k = cv.width / S.VW;
+    if (!lobbyBg || lobbyBg.width !== cv.width) {
+      lobbyBg = document.createElement('canvas'); lobbyBg.width = cv.width; lobbyBg.height = cv.height;
+      const lg = lobbyBg.getContext('2d'); lg.scale(k, k); S.paint(lg, 'lobby');
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(lobbyBg, 0, 0);
     g.setTransform(k, 0, 0, k, 0, 0);
-    if (!lobbyBg) { lobbyBg = document.createElement('canvas'); lobbyBg.width = S.VW * 2; lobbyBg.height = S.VH * 2; const lg = lobbyBg.getContext('2d'); lg.scale(2, 2); S.paint(lg, 'lobby'); }
-    g.drawImage(lobbyBg, 0, 0, S.VW, S.VH);
     drawSprite(g, myId(), 190, 590, 2, 0);
     tag(g, '你', 190, 590 - 112, '#ff5a5f');
   }

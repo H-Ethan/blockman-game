@@ -136,13 +136,13 @@ io.on('connection', socket => {
   });
 });
 
-// ---------- 主迴圈：120Hz 處理移動，每秒廣播 30 次 ----------
+// ---------- 主迴圈：120Hz 處理移動，每秒廣播 40 次 ----------
 let last = Date.now(), lastSend = 0;
 setInterval(() => {
   const now = Date.now();
   const steps = (now - last) / 1000 / Move.STEP; last = now;
   for (const w of Object.values(worlds)) w.tick(now, steps);
-  if (now - lastSend >= 1000 / 30 - 2) {
+  if (now - lastSend >= 1000 / 40 - 2) {
     lastSend = now;
     for (const w of Object.values(worlds)) w.broadcast(now);
   }

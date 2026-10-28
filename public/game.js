@@ -9,13 +9,17 @@
   let W = 960, H = 600, PW = 24, PH = 48, VW = 0, VH = 0;
   const stage = document.getElementById('stage');
   const ctx = stage.getContext('2d');
+  const stageBg = document.getElementById('stageBg');
+  const bctx = stageBg.getContext('2d');
   let k = 1, myId = null, state = null, sprites = {}, obstacles = [], allObjects = [], portals = [], theme = 'meadow', drawables = [], ground = null;
   const chars = {}, disp = {}, particles = [], floaters = [];
   let prevStars = new Map(), skipBurst = false, lastT = 0;
 
   // ---- 移動同步 ----
   const Move = window.Move;
-  const INTERP_MS = 100;        // 其他玩家延後 100ms 顯示，永遠有兩個快照可以插值
+  let interpMs = 100, interpTarget = 100;  // 其他玩家的顯示延遲：依網路抖動自動調整（70～300ms）
+  let lastArrive = 0, lastSnapT = 0, jitterAvg = 0, gapAvg = 25;
+  let RS = 3;                   // 建築、樹木等預先繪製的解析度倍率（跟著畫面大小調整）
   let io = { mask: () => 0, send: () => {} };
   let local = null;             // 自己的預測狀態 { x, y, vx, vy, facing }
   let prevPos = null;           // 上一個物理步的位置（高更新率螢幕用來補間）
@@ -56,23 +60,25 @@
     const dpr = Math.min(window.devicePixelRatio || 1, 2) * quality;
     const w = Math.max(320, Math.round(cssW * dpr));
     if (w === stage.width && ground) return;
-    stage.width = w;
-    stage.height = Math.round(w * VH / VW);
+    stage.width = stageBg.width = w;
+    stage.height = stageBg.height = Math.round(w * VH / VW);
     k = stage.width / VW;
-    if (obstacles.length) buildGround();
+    const rs = Math.max(2, Math.min(5, Math.ceil(k * 1.1)));
+    if (rs !== RS) { RS = rs; window.Props.scale = rs; if (allObjects.length) { buildMap(); return; } }
+    if (allObjects.length) buildGround();
   }
   let resizeTimer = 0;
   addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 150); });
 
-  // 效能監控：持續明顯掉幀才降低解析度（最多 3 次、只降不升），避免反覆重畫背景造成頓挫
+  // 效能監控：長時間明顯掉幀才降低一次解析度，避免反覆重畫背景造成頓挫
   let perfAvg = 16.7, perfCheck = 0, perfDrops = 0;
   function watchPerf(interval, now) {
     if (interval > 0 && interval < 200) perfAvg += (interval - perfAvg) * 0.03;
-    if (!perfCheck) perfCheck = now + 3000;            // 剛進場先讓它穩定一下
+    if (!perfCheck) perfCheck = now + 6000;            // 剛進場先讓它穩定一下
     if (now < perfCheck) return;
     perfCheck = now + 4000;
-    if (perfAvg > 25 && perfDrops < 3) {
-      perfDrops++; quality = Math.max(0.5, quality * 0.75); resize();
+    if (perfAvg > 34 && perfDrops < 1) {          // 長時間低於 30fps 才降一次
+      perfDrops++; quality = 0.75; resize();
       perfAvg = 16.7;
     }
   }
@@ -192,12 +198,22 @@
     for (let x = 0; x < W; x += 10) g.quadraticCurveTo(x + 5, cy + 3 + r() * 5, x + 10, cy - 1);
     g.closePath(); g.fill();
     ground = c;
+    composeStatic();
+  }
+
+  // 靜態圖層：地面＋所有建築樹木依前後順序畫一次，之後每格不用再畫
+  function composeStatic() {
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.drawImage(ground, 0, 0);
+    bctx.setTransform(k, 0, 0, k, 0, PAD_TOP * k);
+    bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+    for (const dr of drawables.slice().sort((a, b) => a.sort - b.sort)) bctx.drawImage(dr.img, dr.x, dr.y, dr.w, dr.h);
   }
 
   // ---------- 磚牆（立方體：頂面＋正面） ----------
   function boxCanvas(w, d, h, seed, first, last) {
     const r = rng(seed);
-    const [c, g] = mk(w, d + h, 3);
+    const [c, g] = mk(w, d + h, RS);
     g.fillStyle = '#d8c6a6'; g.fillRect(0, d, w, h); // 灰縫
     const bh = 7.6;
     for (let row = 0, y = d; y < d + h; row++, y += bh) {
@@ -227,7 +243,7 @@
   function rockCanvas(o) {
     const r = rng(o.seed), w = o.w, d = o.d, rh = 12 + r() * 10, P = 4, N = 16;
     const CW = w + P * 2, CH = d + rh + P * 2;
-    const [c, g] = mk(CW, CH, 3);
+    const [c, g] = mk(CW, CH, RS);
     const cx = P + w / 2, cy = P + d / 2, rx = w / 2, ry = d / 2;
     const jit = Array.from({ length: N }, () => 0.84 + r() * 0.2);
     const pt = (i, shift) => { const a = (i / N) * Math.PI * 2, j = jit[i % N]; return [cx + Math.cos(a) * rx * j, cy + Math.sin(a) * ry * j + shift]; };
@@ -276,7 +292,7 @@
   // ---------- 樹（闊葉樹 / 松樹） ----------
   function treeCanvas(seed) {
     const r = rng(seed), pine = r() < 0.35, bx = 40, by = 112;
-    const [c, g] = mk(80, 120, 3);
+    const [c, g] = mk(80, 120, RS);
     const tw = pine ? 8 : 10, th = pine ? 26 : 40;
     g.fillStyle = '#4f311c'; ellipse(g, bx, by, tw * 0.9, 3);
     g.fillStyle = '#6b4226'; g.fillRect(bx - tw / 2, by - th, tw, th);
@@ -347,7 +363,7 @@
 
   // ---------- 角色：自訂圖 → 立體色塊人（頂面＋明暗＋外框） ----------
   function buildChar(img) {
-    const s = 4;
+    const s = 8;
     const tmp = document.createElement('canvas'); tmp.width = PW; tmp.height = PH;
     const tg = tmp.getContext('2d'); tg.imageSmoothingEnabled = false; tg.drawImage(img, 0, 0, PW, PH);
     const data = tg.getImageData(0, 0, PW, PH).data;
@@ -375,7 +391,7 @@
     tops.forEach((t, x) => { if (t >= 0) g.fillRect(x * s, (t + CAP) * s, s, s * 0.5); });
     g.restore();
 
-    const pad = 2;
+    const pad = 4;
     const sil = document.createElement('canvas'); sil.width = c.width; sil.height = c.height;
     const sg = sil.getContext('2d'); sg.drawImage(c, 0, 0);
     sg.globalCompositeOperation = 'source-in'; sg.fillStyle = 'rgba(18,20,30,.9)'; sg.fillRect(0, 0, sil.width, sil.height);
@@ -544,12 +560,13 @@
 
     // 2) 其他玩家：在兩個伺服器快照之間依時間插值
     if (clockOffset !== null && snaps.length) {
+      interpMs += Math.max(-rawDt * 100, Math.min(rawDt * 100, interpTarget - interpMs)); // 每秒最多調 100ms，看不出來
       if (renderOffset === null || Math.abs(clockOffset - renderOffset) > 250) renderOffset = clockOffset;
       else {
         const lim = rawDt * 1000 * 0.1;
         renderOffset += Math.max(-lim, Math.min(lim, clockOffset - renderOffset));
       }
-      const rt = performance.now() + renderOffset - INTERP_MS;
+      const rt = performance.now() + renderOffset - interpMs;
       let i = snaps.length - 1;
       while (i > 0 && snaps[i].t > rt) i--;
       const A = snaps[i], B = snaps[i + 1];
@@ -574,43 +591,55 @@
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.drawImage(ground, 0, 0); // 與畫布同尺寸，直接貼上不縮放（最省效能）
+    ctx.clearRect(0, 0, stage.width, stage.height); // 背景在底層畫布，這層只畫會動的東西
     ctx.setTransform(k, 0, 0, k, 0, 0);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
     ctx.translate(0, PAD_TOP);
 
-    // 動態影子
-    ctx.fillStyle = 'rgba(0,0,0,.28)';
-    for (const p of state.players) {
-      const d = disp[p.id]; if (!d) continue;
-      const b = d.bob || 0;
-      ellipse(ctx, d.x + 3, d.y + 1, 13 - b * 0.8, 5 - b * 0.3);
-    }
-    // 建築入口的發光區域
-    for (const po of portals) drawPortal(po, t);
     for (let i = dust.length - 1; i >= 0; i--) {
       const q = dust[i]; q.life -= dt * 2.2; q.x += q.vx * dt; q.r += dt * 9;
       if (q.life <= 0) { dust.splice(i, 1); continue; }
       ctx.fillStyle = `rgba(236,226,196,${0.5 * q.life})`; ellipse(ctx, q.x, q.y - (1 - q.life) * 4, q.r, q.r * 0.6);
     }
-    ctx.fillStyle = 'rgba(0,0,0,.2)';
-    for (const s of state.stars) { const z = starZ(s, t); ellipse(ctx, s.x + 2, s.y + 1, 10 - z * 0.15, 4 - z * 0.05); }
-
-    // 依前後深度排序繪製
+    // 會動的東西（角色、星星、入口光圈）＋擋在它們前面的靜態物件，依前後深度排序繪製
     const me = disp[myId];
     const ents = [];
-    for (const dr of drawables) ents.push({ sort: dr.sort, fn: () => {
-      let alpha = 1;
-      if (dr.canopy && me && me.y < dr.sort) {
-        const c = dr.canopy;
-        if (me.x + 12 > c.x && me.x - 12 < c.x + c.w && me.y > c.y && me.y - PH < c.y + c.h) alpha = 0.45;
+    for (const po of portals) ents.push({ sort: po.y - 0.5, x0: po.x - 30, x1: po.x + po.w + 30, y0: po.y + po.d / 2 - 80, y1: po.y + po.d + 16, kind: 0, ref: po });
+    for (const s of state.stars) ents.push({ sort: s.y, x0: s.x - 16, x1: s.x + 16, y0: s.y - 44, y1: s.y + 8, kind: 1, ref: s });
+    for (const p of state.players) {
+      const d = disp[p.id];
+      if (d) ents.push({ sort: d.y, x0: d.x - 18, x1: d.x + 18, y0: d.y - PH - CAP - 10, y1: d.y + 8, kind: 2, ref: p });
+    }
+    const dyn = ents.length;
+    for (const dr of drawables) {
+      for (let i = 0; i < dyn; i++) {
+        const e = ents[i];
+        if (dr.sort > e.sort && dr.x < e.x1 && dr.x + dr.w > e.x0 && dr.y < e.y1 && dr.y + dr.h > e.y0) {
+          ents.push({ sort: dr.sort, kind: 3, ref: dr }); break;
+        }
       }
-      ctx.globalAlpha = alpha; ctx.drawImage(dr.img, dr.x, dr.y, dr.w, dr.h); ctx.globalAlpha = 1;
-    } });
-    for (const p of state.players) if (disp[p.id]) ents.push({ sort: disp[p.id].y, fn: () => drawPlayer(p, t, 1) });
-    for (const s of state.stars) ents.push({ sort: s.y, fn: () => drawStar(s, t) });
-    ents.sort((x, y) => x.sort - y.sort);
-    for (const e of ents) e.fn();
+    }
+    ents.sort((a, b) => a.sort - b.sort);
+    for (const e of ents) {
+      if (e.kind === 0) drawPortal(e.ref, t);
+      else if (e.kind === 1) {
+        const s = e.ref, z = starZ(s, t);
+        ctx.fillStyle = 'rgba(0,0,0,.2)'; ellipse(ctx, s.x + 2, s.y + 1, 10 - z * 0.15, 4 - z * 0.05);
+        drawStar(s, t);
+      } else if (e.kind === 2) {
+        const d = disp[e.ref.id], b = d.bob || 0;
+        ctx.fillStyle = 'rgba(0,0,0,.28)'; ellipse(ctx, d.x + 3, d.y + 1, 13 - b * 0.8, 5 - b * 0.3);
+        drawPlayer(e.ref, t, 1);
+      } else {
+        const dr = e.ref;
+        let alpha = 1;
+        if (dr.canopy && me && me.y < dr.sort) {
+          const c = dr.canopy;
+          if (me.x + 12 > c.x && me.x - 12 < c.x + c.w && me.y > c.y && me.y - PH < c.y + c.h) alpha = 0.45;
+        }
+        ctx.globalAlpha = alpha; ctx.drawImage(dr.img, dr.x, dr.y, dr.w, dr.h); ctx.globalAlpha = 1;
+      }
+    }
 
     // 自己被擋住時仍看得到淡淡的身影
     const mine = state.players.find(p => p.id === myId);
@@ -680,7 +709,8 @@
       W = cfg.W; H = cfg.H; PW = cfg.PW; PH = cfg.PH; myId = id;
       if (hooks) io = hooks;
       allObjects = []; obstacles = []; portals = []; drawables = []; ground = null; state = null;
-      local = null; pending = []; snaps = []; clockOffset = null; renderOffset = null; acc = 0; errX = errY = 0;
+      bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, stageBg.width, stageBg.height);
+      local = null; pending = []; snaps = []; clockOffset = null; renderOffset = null; lastArrive = 0; acc = 0; errX = errY = 0;
       VW = W; VH = PAD_TOP + H + CLIFF;
       resize();
       if (obstacles.length) buildMap();
@@ -694,11 +724,13 @@
       if (VW) buildMap();
     },
     stop() { state = null; local = null; pending = []; snaps = []; },
+    resize() { resize(); },
+    aspect: () => (VW && VH ? VW / VH : 960 / 702),
     setSprites(map) {
       sprites = map;
       for (const [id, s] of Object.entries(map)) {
         if (chars[id] && chars[id].src === s.sprite) continue;
-        const entry = chars[id] = { src: s.sprite, c: null, s: 4, pad: 2 };
+        const entry = chars[id] = { src: s.sprite, c: null, s: 8, pad: 4 };
         const im = new Image();
         im.onload = () => { if (chars[id] === entry) Object.assign(entry, buildChar(im)); };
         im.src = s.sprite;
@@ -713,12 +745,21 @@
 
       // 時鐘對齊：估計「伺服器時間 − 本機時間」，偏向延遲最低的那次
       const now = performance.now(), sample = s.t - now;
+      if (lastArrive) {
+        const gap = s.t - lastSnapT, arrive = now - lastArrive;
+        if (gap > 0 && gap < 500) {
+          gapAvg += (gap - gapAvg) * 0.1;
+          jitterAvg += (Math.abs(arrive - gap) - jitterAvg) * 0.1;
+          interpTarget = Math.max(70, Math.min(300, gapAvg * 1.6 + jitterAvg * 2.5));
+        }
+      }
+      lastArrive = now; lastSnapT = s.t;
       if (clockOffset === null || sample > clockOffset) clockOffset = sample;
       else clockOffset += (sample - clockOffset) * 0.02;
       const map = {};
       for (const p of s.players) map[p.id] = p;
       snaps.push({ t: s.t, map });
-      while (snaps.length > 2 && snaps[1].t < now + clockOffset - INTERP_MS - 500) snaps.shift();
+      while (snaps.length > 2 && snaps[1].t < now + clockOffset - interpMs - 500) snaps.shift();
 
       // 伺服器校正：從伺服器確認的位置重播尚未確認的指令
       const mine = map[myId];

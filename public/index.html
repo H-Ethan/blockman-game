@@ -9,7 +9,7 @@
   :root { --bg:#f4f1ea; --ink:#222; --card:#fff; --line:#222; --accent:#ff5a5f; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: "Noto Sans TC", system-ui, sans-serif; background:var(--bg); color:var(--ink); }
-  header { padding:14px 16px; border-bottom:3px solid var(--line); background:var(--card); display:flex; align-items:center; gap:12px; }
+  header { padding:10px 16px; border-bottom:3px solid var(--line); background:var(--card); display:flex; align-items:center; gap:12px; }
   header h1 { margin:0; font-size:22px; letter-spacing:1px; }
   .wrap { max-width:1100px; margin:0 auto; padding:16px; }
   .card { background:var(--card); border:3px solid var(--line); padding:16px; }
@@ -40,11 +40,26 @@
   .pad { display:grid; grid-template-columns: repeat(3, 56px); gap:6px; justify-content:center; margin-top:12px; user-select:none; }
   .pad button { height:56px; font-size:22px; touch-action:none; }
   .hint { color:#666; font-size:14px; }
-  #stage { width:100%; height:auto; border:3px solid var(--line); background:#101a26; display:block; border-radius:6px; }
-  .game { display:grid; grid-template-columns: 1fr 250px; gap:16px; }
+  /* 兩層畫布：底層是靜態場景（只畫一次），上層每格只畫會動的東西 */
+  #stage { position:relative; width:100%; height:auto; display:block; background:transparent; }
+  #stageBg { position:absolute; left:0; top:0; width:100%; height:100%; display:block; }
+  /* 遊戲畫面：依視窗大小放到最大，側欄固定寬度 */
+  .wrap.wide { max-width:1720px; padding:10px 14px; }
+  .game { display:grid; grid-template-columns: minmax(0,1fr) 250px; gap:14px; align-items:start; }
   @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
-  .zone-title { display:flex; align-items:center; gap:8px; margin:0 0 8px; font-size:18px; }
-  .zone-title small { font-weight:normal; color:#666; font-size:13px; }
+  .stage-wrap { position:relative; margin:0 auto; width:100%; border:3px solid var(--line); border-radius:6px; overflow:hidden; background:#101a26; }
+  .game .board { max-height:calc(100vh - 90px); overflow:auto; }
+  .game #chatLog { height:220px; }
+  /* 方向鍵只在觸控裝置顯示，疊在畫面左下角 */
+  .pad { display:none !important; }
+  @media (pointer:coarse) {
+    .pad { display:grid !important; position:absolute; left:10px; bottom:10px; margin:0; grid-template-columns:repeat(3,52px); opacity:.85; }
+    .pad button { height:52px; background:rgba(255,255,255,.88); border-radius:10px; }
+  }
+  #dgLobby .scene { width:min(100%, calc((100vh - 110px) * 1.6)); margin:0 auto; }
+  .room .scene { width:min(100%, calc((100vh - 230px) * 1.6)); margin:0 auto; }
+  .zone-title { margin:0 0 8px; font-size:18px; line-height:1.3; }
+  .zone-title small { display:block; font-weight:normal; color:#666; font-size:13px; margin-top:2px; }
 
   /* ---------- 進入建築的轉場 ---------- */
   #fade { position:fixed; inset:0; background:#1a1240; color:#fff; display:flex; align-items:center; justify-content:center;
@@ -79,7 +94,7 @@
   .lobby-foot { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; flex-wrap:wrap; }
   .lobby-foot .hint { font-size:13px; }
 
-  .room { display:grid; grid-template-columns: 1fr 280px; gap:12px; }
+  .room { display:grid; grid-template-columns: minmax(0,1fr) 300px; gap:12px; }
   @media (max-width:900px){ .room { grid-template-columns: 1fr; } }
   .topbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:#fff; border:3px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; }
   .badge { background:#fef3c7; border:2px solid #b45309; border-radius:999px; padding:3px 10px; font-size:14px; font-weight:bold; }
@@ -208,9 +223,10 @@
 </div>
 
 <!-- ===== 可走動的場景（廣場、搶星星草原） ===== -->
-<div class="wrap hidden" id="gameScreen">
+<div class="wrap wide hidden" id="gameScreen">
   <div class="game">
-    <div>
+    <div class="stage-wrap" id="stageWrap">
+      <canvas id="stageBg" width="960" height="726"></canvas>
       <canvas id="stage" width="960" height="726"></canvas>
       <div class="pad" id="pad">
         <span></span><button data-k="up">▲</button><span></span>
@@ -231,7 +247,7 @@
 </div>
 
 <!-- ===== 你畫我猜：大廳 ===== -->
-<div class="wrap hidden" id="dgLobby">
+<div class="wrap wide hidden" id="dgLobby">
   <div class="scene">
     <canvas class="bg" id="lobbyBg"></canvas>
     <div class="lobby-sign">🎨 你畫我猜</div>
@@ -260,7 +276,7 @@
 </div>
 
 <!-- ===== 你畫我猜：房間 ===== -->
-<div class="wrap hidden" id="dgRoom" style="max-width:1280px">
+<div class="wrap wide hidden" id="dgRoom">
   <div class="topbar">
     <span id="dgRoomBadge"></span>
     <span id="dgRound"></span>
