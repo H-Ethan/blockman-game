@@ -13,6 +13,16 @@
   const chars = {}, disp = {}, particles = [], floaters = [];
   let prevStars = new Map(), skipBurst = false, lastT = 0;
 
+  // ---- 移動同步 ----
+  const Move = window.Move;
+  const INTERP_MS = 100;        // 其他玩家延後 100ms 顯示，永遠有兩個快照可以插值
+  let io = { mask: () => 0, send: () => {} };
+  let local = null;             // 自己的預測狀態 { x, y, vx, vy, facing }
+  let prevPos = null;           // 上一個物理步的位置（高更新率螢幕用來補間）
+  let pending = [];             // 已送出、伺服器尚未確認的指令
+  let seq = 0, acc = 0, errX = 0, errY = 0;
+  let snaps = [], clockOffset = null;
+
   // ---------- 小工具 ----------
   const rng = seed => {
     let a = seed >>> 0;
@@ -358,19 +368,22 @@
   }
 
   // ---------- 繪製角色 ----------
-  function charMotion(p, t) {
-    const ph = hashf(p.id) * 10;
-    if (p.moving) { const s = Math.abs(Math.sin(t * 0.02 + ph)); return { bob: s * 3, sx: 1 - s * 0.03, sy: 1 + s * 0.03 }; }
-    return { bob: 0, sx: 1, sy: 1 + Math.sin(t * 0.004 + ph) * 0.018 };
+  function charMotion(d, id, t) {
+    const ph = hashf(id) * 10, sp = Math.min(1, Math.hypot(d.vx || 0, d.vy || 0) / Move.MAX_SPEED);
+    const idle = { bob: 0, sx: 1, sy: 1 + Math.sin(t * 0.004 + ph) * 0.018 };
+    if (sp < 0.08) return idle;
+    const s = Math.abs(Math.sin(d.walk || 0));
+    return { bob: s * 3.2 * sp, sx: 1 - s * 0.035 * sp, sy: 1 + s * 0.035 * sp + (1 - sp) * (idle.sy - 1), lean: (d.vx || 0) / Move.MAX_SPEED * 0.06 };
   }
   function drawPlayer(p, t, alpha) {
     const ch = chars[p.id], d = disp[p.id];
     if (!ch || !ch.c || !d) return;
-    const m = charMotion(p, t); d.bob = m.bob;
+    const m = charMotion(d, p.id, t); d.bob = m.bob;
     const dw = ch.c.width / ch.s, dh = ch.c.height / ch.s;
     ctx.save(); ctx.globalAlpha = alpha;
     ctx.translate(d.x, d.y - m.bob);
-    ctx.scale((p.facing < 0 ? -1 : 1) * m.sx, m.sy);
+    if (m.lean) ctx.rotate(m.lean);
+    ctx.scale((d.facing < 0 ? -1 : 1) * m.sx, m.sy);
     ctx.drawImage(ch.c, -dw / 2, -dh + ch.pad / ch.s, dw, dh);
     ctx.restore();
   }
@@ -392,14 +405,59 @@
   function frame(t) {
     requestAnimationFrame(frame);
     if (!state || !ground || !VW) return;
-    const dt = Math.min(0.05, (t - (lastT || t)) / 1000); lastT = t;
+    const rawDt = lastT ? (t - lastT) / 1000 : 0; lastT = t;
+    const dt = Math.min(0.05, rawDt);
 
-    // 平滑插值（伺服器 30 次/秒，畫面 60 次/秒）
-    const a = 1 - Math.exp(-dt * 20);
+    // 1) 自己：固定步長本機預測，按下就動，不必等伺服器回應
+    let alpha = 1;
+    if (local) {
+      acc = Math.min(acc + rawDt, 0.25);
+      const out = [];
+      while (acc >= Move.STEP) {
+        acc -= Move.STEP;
+        prevPos = { x: local.x, y: local.y };
+        const mask = state.winner ? 0 : io.mask();
+        if (state.winner || (!mask && !local.vx && !local.vy)) continue; // 靜止時不送封包
+        seq++;
+        Move.step(local, mask, obstacles, W, H);
+        pending.push([seq, mask]); out.push([seq, mask]);
+      }
+      if (out.length) io.send(out);
+      alpha = acc / Move.STEP;
+      const fade = Math.exp(-dt * 12); errX *= fade; errY *= fade; // 校正誤差慢慢消化掉
+      if (Math.abs(errX) < 0.01) errX = 0; if (Math.abs(errY) < 0.01) errY = 0;
+      const d = disp[myId] || (disp[myId] = { walk: 0 });
+      d.x = prevPos.x + (local.x - prevPos.x) * alpha + errX;
+      d.y = prevPos.y + (local.y - prevPos.y) * alpha + errY;
+      d.vx = local.vx; d.vy = local.vy; d.facing = local.facing;
+    }
+
+    // 2) 其他玩家：在兩個伺服器快照之間依時間插值
+    if (clockOffset !== null && snaps.length) {
+      const rt = performance.now() + clockOffset - INTERP_MS;
+      let i = snaps.length - 1;
+      while (i > 0 && snaps[i].t > rt) i--;
+      const A = snaps[i], B = snaps[i + 1];
+      for (const p of state.players) {
+        if (p.id === myId) continue;
+        const d = disp[p.id] || (disp[p.id] = { x: p.x, y: p.y, walk: 0 });
+        const pa = A.map[p.id], pb = B && B.map[p.id];
+        let q = pa || pb || p;
+        if (pa && pb) {
+          const f = Math.max(0, Math.min(1, (rt - A.t) / (B.t - A.t)));
+          if (Math.hypot(pb.x - pa.x, pb.y - pa.y) > 60) q = f < 0.5 ? pa : pb; // 傳送（新回合）不插值
+          else q = { x: pa.x + (pb.x - pa.x) * f, y: pa.y + (pb.y - pa.y) * f,
+                     vx: pa.vx + (pb.vx - pa.vx) * f, vy: pa.vy + (pb.vy - pa.vy) * f, facing: f < 0.5 ? pa.facing : pb.facing };
+        } else if (pa && !B) {
+          const ex = Math.min(0.1, Math.max(0, (rt - A.t) / 1000)); // 封包晚到：依速度短暫外推
+          q = { x: pa.x + pa.vx * ex, y: pa.y + pa.vy * ex, vx: pa.vx, vy: pa.vy, facing: pa.facing };
+        }
+        d.x = q.x; d.y = q.y; d.vx = q.vx || 0; d.vy = q.vy || 0; d.facing = q.facing;
+      }
+    }
     for (const p of state.players) {
-      const d = disp[p.id] || (disp[p.id] = { x: p.x, y: p.y });
-      if (Math.hypot(p.x - d.x, p.y - d.y) > 60) { d.x = p.x; d.y = p.y; }
-      else { d.x += (p.x - d.x) * a; d.y += (p.y - d.y) * a; }
+      const d = disp[p.id];
+      if (d) d.walk = (d.walk || 0) + Math.hypot(d.vx || 0, d.vy || 0) * dt * 0.1;
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -412,7 +470,8 @@
     // 動態影子
     ctx.fillStyle = 'rgba(0,0,0,.28)';
     for (const p of state.players) {
-      const d = disp[p.id], b = d.bob || 0;
+      const d = disp[p.id]; if (!d) continue;
+      const b = d.bob || 0;
       ellipse(ctx, d.x + 3, d.y + 1, 13 - b * 0.8, 5 - b * 0.3);
     }
     ctx.fillStyle = 'rgba(0,0,0,.2)';
@@ -429,7 +488,7 @@
       }
       ctx.globalAlpha = alpha; ctx.drawImage(dr.img, dr.x, dr.y, dr.w, dr.h); ctx.globalAlpha = 1;
     } });
-    for (const p of state.players) ents.push({ sort: disp[p.id].y, fn: () => drawPlayer(p, t, 1) });
+    for (const p of state.players) if (disp[p.id]) ents.push({ sort: disp[p.id].y, fn: () => drawPlayer(p, t, 1) });
     for (const s of state.stars) ents.push({ sort: s.y, fn: () => drawStar(s, t) });
     ents.sort((x, y) => x.sort - y.sort);
     for (const e of ents) e.fn();
@@ -483,8 +542,11 @@
 
   // ---------- 對外介面 ----------
   window.Game = {
-    start(cfg, id) {
+    _disp: disp, // 除錯用
+    start(cfg, id, hooks) {
       W = cfg.W; H = cfg.H; PW = cfg.PW; PH = cfg.PH; myId = id;
+      if (hooks) io = hooks;
+      local = null; pending = []; snaps = []; clockOffset = null; acc = 0; errX = errY = 0;
       VW = W; VH = PAD_TOP + H + CLIFF;
       resize();
       if (obstacles.length) buildMap();
@@ -509,6 +571,31 @@
       skipBurst = false;
       prevStars = new Map(s.stars.map(x => [x.id, x]));
       state = s;
+
+      // 時鐘對齊：估計「伺服器時間 − 本機時間」，偏向延遲最低的那次
+      const now = performance.now(), sample = s.t - now;
+      if (clockOffset === null || sample > clockOffset) clockOffset = sample;
+      else clockOffset += (sample - clockOffset) * 0.02;
+      const map = {};
+      for (const p of s.players) map[p.id] = p;
+      snaps.push({ t: s.t, map });
+      while (snaps.length > 2 && snaps[1].t < now + clockOffset - INTERP_MS - 500) snaps.shift();
+
+      // 伺服器校正：從伺服器確認的位置重播尚未確認的指令
+      const mine = map[myId];
+      if (!mine) return;
+      if (!local) {
+        local = { x: mine.x, y: mine.y, vx: mine.vx, vy: mine.vy, facing: mine.facing };
+        prevPos = { x: mine.x, y: mine.y };
+        return;
+      }
+      pending = pending.filter(c => c[0] > mine.ack);
+      const r = { x: mine.x, y: mine.y, vx: mine.vx, vy: mine.vy, facing: local.facing };
+      for (const c of pending) Move.step(r, c[1], obstacles, W, H);
+      const ex = local.x - r.x, ey = local.y - r.y;
+      if (Math.hypot(ex, ey) > 60) { errX = errY = 0; prevPos = { x: r.x, y: r.y }; } // 新回合傳送：直接跳過去
+      else if (ex || ey) { errX += ex; errY += ey; prevPos.x -= ex; prevPos.y -= ey; }
+      Object.assign(local, r);
     }
   };
 })();

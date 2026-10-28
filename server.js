@@ -2,6 +2,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const Move = require('./public/shared.js');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,12 +12,12 @@ app.use(express.static(__dirname + '/public'));
 // ---- 遊戲參數 ----
 const W = 960, H = 600;      // 地面大小（俯視座標，y 代表前後深度）
 const PW = 24, PH = 48;      // 角色圖大小
-const FOOT_W = 10, FOOT_D = 6; // 角色腳下碰撞範圍（半寬、半深）
-const SPEED = 4.2;           // 每 tick 移動像素
 const WIN_SCORE = 10;        // 獲勝分數
 const STAR_COUNT = 4;
 const PICK_R = 22;           // 撿星星距離
-const TICK = 1000 / 30;
+const SEND_MS = 1000 / 30;   // 每秒廣播 30 次
+const MAX_QUEUE = 30;        // 每位玩家最多暫存的指令數
+const MAX_CREDIT = 8;        // 允許短暫補送的步數（防加速外掛）
 
 const players = {};          // socket.id -> player
 let stars = [];
@@ -29,11 +30,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---- 碰撞 ----
-function hitsObstacle(x, y, pad = 0) {
-  return obstacles.some(o =>
-    x + FOOT_W + pad > o.x && x - FOOT_W - pad < o.x + o.w &&
-    y + FOOT_D + pad > o.y && y - FOOT_D - pad < o.y + o.d);
-}
+const hitsObstacle = (x, y, pad = 0) => Move.hits(obstacles, x, y, pad);
 function freeSpot(pad) {
   for (let i = 0; i < 500; i++) {
     const x = rand(30, W - 30), y = rand(30, H - 30);
@@ -73,7 +70,7 @@ function resetRound() {
   stars = Array.from({ length: STAR_COUNT }, spawnStar);
   for (const p of Object.values(players)) {
     p.score = 0;
-    Object.assign(p, freeSpot(6));
+    Object.assign(p, freeSpot(6), { vx: 0, vy: 0, queue: [] });
   }
   winner = null;
   io.emit('map', obstacles);
@@ -92,16 +89,25 @@ io.on('connection', socket => {
       return;
     }
     const name = String((data && data.name) || '玩家').trim().slice(0, 12) || '玩家';
-    players[socket.id] = { id: socket.id, name, sprite, ...freeSpot(6), score: 0, input: {}, facing: 1, moving: false };
+    players[socket.id] = { id: socket.id, name, sprite, ...freeSpot(6), vx: 0, vy: 0, score: 0, facing: 1,
+      queue: [], seq: 0, credit: 0 };
     socket.emit('joined', { id: socket.id, W, H, PW, PH, WIN_SCORE });
     socket.emit('map', obstacles);
     io.emit('sprites', spriteMap());
     io.emit('chat', { name: '系統', text: `${name} 加入了遊戲` });
   });
 
-  socket.on('input', i => {
+  // 客戶端送來編號過的移動指令：[[seq, 按鍵位元], ...]，每筆代表一個 1/60 秒的步長
+  socket.on('cmds', list => {
     const p = players[socket.id];
-    if (p && i) p.input = { up: !!i.up, down: !!i.down, left: !!i.left, right: !!i.right };
+    if (!p || !Array.isArray(list)) return;
+    for (const c of list.slice(0, 20)) {
+      if (!Array.isArray(c)) continue;
+      const seq = c[0], mask = c[1] & 15;
+      if (!Number.isInteger(seq) || seq <= p.seq) continue;
+      if (p.queue.length < MAX_QUEUE) p.queue.push([seq, mask]);
+      p.seq = seq;
+    }
   });
 
   socket.on('chat', text => {
@@ -120,52 +126,50 @@ io.on('connection', socket => {
   });
 });
 
-// 單軸移動：被擋住就試著走小一點，可以貼著牆滑行
-function stepAxis(p, axis, delta) {
-  for (const f of [1, 0.5, 0.25]) {
-    const nx = axis === 'x' ? clamp(p.x + delta * f, FOOT_W, W - FOOT_W) : p.x;
-    const ny = axis === 'y' ? clamp(p.y + delta * f, FOOT_D + 2, H - FOOT_D) : p.y;
-    if (!hitsObstacle(nx, ny)) { p.x = nx; p.y = ny; return; }
-  }
-}
-
-setInterval(() => {
-  const now = Date.now();
-  if (winner && now > resetAt) resetRound();
-
-  for (const p of Object.values(players)) {
-    p.moving = false;
-    if (winner) continue;
-    let dx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-    let dy = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
-    if (dx && dy) { dx *= Math.SQRT1_2; dy *= Math.SQRT1_2; }
-    if (dx) p.facing = dx > 0 ? 1 : -1;
-    const ox = p.x, oy = p.y;
-    if (dx) stepAxis(p, 'x', dx * SPEED);
-    if (dy) stepAxis(p, 'y', dy * SPEED);
-    p.moving = p.x !== ox || p.y !== oy;
-
-    for (let i = 0; i < stars.length; i++) {
-      const s = stars[i];
-      if (Math.hypot(s.x - p.x, s.y - p.y) < PICK_R) {
-        p.score++;
-        stars[i] = spawnStar();
-        if (p.score >= WIN_SCORE && !winner) {
-          winner = p.name;
-          resetAt = now + 4000;
-        }
+function checkStars(p, now) {
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    if (Math.hypot(s.x - p.x, s.y - p.y) < PICK_R) {
+      p.score++;
+      stars[i] = spawnStar();
+      if (p.score >= WIN_SCORE && !winner) {
+        winner = p.name;
+        resetAt = now + 4000;
       }
     }
   }
+}
 
-  io.emit('state', {
-    players: Object.values(players).map(p => ({
-      id: p.id, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
-      score: p.score, facing: p.facing, moving: p.moving
-    })),
-    stars, winner
-  });
-}, TICK);
+// 主迴圈：依實際經過時間發放步數額度，每位玩家依序執行自己的指令
+let last = Date.now(), lastSend = 0;
+setInterval(() => {
+  const now = Date.now();
+  const steps = (now - last) / 1000 / Move.STEP; last = now;
+  if (winner && now > resetAt) resetRound();
+
+  for (const p of Object.values(players)) {
+    p.credit = Math.min(MAX_CREDIT, p.credit + steps);
+    while (p.queue.length && p.credit >= 1) {
+      const [seq, mask] = p.queue.shift();
+      p.credit -= 1;
+      p.ack = seq;
+      if (winner) continue; // 結算畫面時不移動，但照樣確認指令
+      Move.step(p, mask, obstacles, W, H);
+      checkStars(p, now);
+    }
+  }
+
+  if (now - lastSend >= SEND_MS - 2) {
+    lastSend = now;
+    io.emit('state', {
+      t: now,
+      players: Object.values(players).map(p => ({
+        id: p.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy, score: p.score, facing: p.facing, ack: p.ack || 0
+      })),
+      stars, winner
+    });
+  }
+}, 1000 / 120);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`色塊人遊戲啟動：http://localhost:${PORT}`));
