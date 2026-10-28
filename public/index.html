@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>色塊人大亂鬥</title>
+<title>色塊人宇宙都市</title>
 <style>
+
   :root { --bg:#f4f1ea; --ink:#222; --card:#fff; --line:#222; --accent:#ff5a5f; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: "Noto Sans TC", system-ui, sans-serif; background:var(--bg); color:var(--ink); }
@@ -32,9 +33,6 @@
   .palette { display:flex; flex-wrap:wrap; gap:6px; }
   .swatch { width:28px; height:28px; border:2px solid var(--line); cursor:pointer; }
   .swatch.sel { outline:3px solid var(--accent); outline-offset:2px; }
-  .game { display:grid; grid-template-columns: 1fr 240px; gap:16px; }
-  @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
-  #stage { width:100%; height:auto; border:3px solid var(--line); background:#101a26; display:block; border-radius:6px; }
   .board li { display:flex; align-items:center; gap:8px; padding:4px 0; }
   .board img { width:12px; height:24px; image-rendering:pixelated; }
   .board ol { padding-left:20px; margin:8px 0; }
@@ -42,10 +40,122 @@
   .pad { display:grid; grid-template-columns: repeat(3, 56px); gap:6px; justify-content:center; margin-top:12px; user-select:none; }
   .pad button { height:56px; font-size:22px; touch-action:none; }
   .hint { color:#666; font-size:14px; }
+  #stage { width:100%; height:auto; border:3px solid var(--line); background:#101a26; display:block; border-radius:6px; }
+  .game { display:grid; grid-template-columns: 1fr 250px; gap:16px; }
+  @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
+  .zone-title { display:flex; align-items:center; gap:8px; margin:0 0 8px; font-size:18px; }
+  .zone-title small { font-weight:normal; color:#666; font-size:13px; }
+
+  /* ---------- 進入建築的轉場 ---------- */
+  #fade { position:fixed; inset:0; background:#1a1240; color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:28px; font-weight:900; letter-spacing:2px; opacity:0; pointer-events:none; transition:opacity .28s; z-index:50; }
+  #fade.show { opacity:1; }
+
+  /* ---------- 你畫我猜 ---------- */
+  .scene { position:relative; width:100%; aspect-ratio: 960 / 600; border:3px solid var(--line); border-radius:8px; overflow:hidden; background:#e2a96b; }
+  .scene > canvas.bg { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .lobby-panel { position:absolute; left:50%; top:52%; transform:translate(-50%,-50%); width:min(560px, 86%);
+    background:rgba(255,250,240,.96); border:3px solid #3b2414; border-radius:16px; padding:18px 18px 14px; box-shadow:0 8px 0 rgba(59,36,20,.35); }
+  .lobby-sign { position:absolute; left:50%; top:4%; transform:translateX(-50%); background:linear-gradient(#ff7b7b,#e8434b); color:#fff;
+    border:3px solid #2b1a10; border-radius:10px; padding:6px 22px; font-size:clamp(16px,2.6vw,26px); font-weight:900; letter-spacing:3px;
+    text-shadow:0 2px 0 #7a1d22; box-shadow:0 4px 0 #2b1a10; white-space:nowrap; }
+  .lobby-panel h2 { margin:0 0 4px; font-size:20px; text-align:center; }
+  .lobby-panel .sub { text-align:center; color:#7a5a3a; margin:0 0 12px; font-size:14px; }
+  .opts { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+  @media (max-width:600px){ .opts { grid-template-columns: 1fr; } .lobby-panel { top:50%; padding:12px; } }
+  .opt { border:3px solid #3b2414; border-radius:12px; background:#fff; padding:12px 8px; text-align:center; cursor:pointer;
+    box-shadow:0 4px 0 #3b2414; transition: transform .08s, box-shadow .08s; }
+  .opt:hover { transform:translateY(-2px); box-shadow:0 6px 0 #3b2414; background:#fff; }
+  .opt:active { transform:translateY(3px); box-shadow:0 1px 0 #3b2414; }
+  .opt .ico { font-size:30px; display:block; }
+  .opt b { display:block; font-size:16px; margin:4px 0 2px; }
+  .opt span { font-size:12px; color:#6b5440; }
+  .opt.pub { background:#fff4d6; } .opt.rnd { background:#e0f2ff; } .opt.pri { background:#f1e6ff; }
+  .notice { margin-top:12px; border:2px dashed #b45309; background:#fff7e6; border-radius:10px; padding:10px; text-align:center; }
+  .notice p { margin:0 0 8px; font-weight:bold; color:#92400e; }
+  .private-box { margin-top:12px; border:2px solid #7c3aed; background:#faf5ff; border-radius:10px; padding:10px; display:grid; gap:8px; }
+  .private-box .join { display:flex; gap:8px; }
+  .private-box input { text-transform:uppercase; letter-spacing:6px; font-weight:900; text-align:center; font-size:20px; }
+  .lobby-foot { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; flex-wrap:wrap; }
+  .lobby-foot .hint { font-size:13px; }
+
+  .room { display:grid; grid-template-columns: 1fr 280px; gap:12px; }
+  @media (max-width:900px){ .room { grid-template-columns: 1fr; } }
+  .topbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:#fff; border:3px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; }
+  .badge { background:#fef3c7; border:2px solid #b45309; border-radius:999px; padding:3px 10px; font-size:14px; font-weight:bold; }
+  .badge.private { background:#f3e8ff; border-color:#7c3aed; }
+  .badge .code { letter-spacing:3px; font-size:17px; color:#6d28d9; }
+  button.mini { padding:2px 8px; font-size:12px; border-radius:6px; margin-left:6px; }
+  #dgRound { font-weight:bold; color:#475569; }
+  #dgWord { flex:1; display:flex; align-items:baseline; justify-content:center; gap:8px; flex-wrap:wrap; min-width:200px; }
+  #dgWord .lbl { color:#64748b; font-size:13px; }
+  #dgWord .hint { font-size:24px; letter-spacing:4px; }
+  #dgWord .answer { font-size:24px; color:#dc2626; letter-spacing:2px; }
+  #dgWord .answer.ok { color:#16a34a; }
+  #dgWord .cat { background:#e0f2fe; border-radius:6px; padding:1px 8px; font-size:13px; color:#0369a1; }
+  .timer { --p:360deg; width:48px; height:48px; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(#22c55e var(--p), #e5e7eb 0); border:3px solid var(--line); }
+  .timer b { background:#fff; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-size:16px; }
+  .timer.urgent { background:conic-gradient(#ef4444 var(--p), #fee2e2 0); animation: shake .5s infinite; }
+  @keyframes shake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-6deg)} 75%{transform:rotate(6deg)} }
+
+  #dgBoard { position:absolute; left:26.0417%; top:11%; width:47.9167%; height:57.5%; background:#fff; touch-action:none; display:block; }
+  .board-ov { position:absolute; left:26.0417%; top:11%; width:47.9167%; height:57.5%; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,248,235,.92); }
+  .board-ov.soft { background:rgba(255,248,235,.78); }
+  .ov-card { width:92%; max-height:96%; overflow:auto; text-align:center; padding:6px; }
+  .ov-card h3 { margin:2px 0 8px; font-size:clamp(15px,2vw,22px); }
+  .ov-card .sub { margin:4px 0; color:#7a5a3a; font-size:14px; }
+  .ov-card .why { margin:6px 0 0; color:#94a3b8; font-size:12px; }
+  .ov-card .invite { margin:6px 0; background:#f3e8ff; border-radius:8px; padding:6px; font-size:13px; color:#6d28d9; }
+  .settings { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0; }
+  .set { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#7a5a3a; }
+  .set select, .set b { font:inherit; font-size:15px; font-weight:bold; color:#222; border:2px solid var(--line); border-radius:8px; padding:5px; background:#fff; }
+  button.big { font-size:17px; font-weight:900; padding:10px 22px; border-radius:12px; box-shadow:0 4px 0 #222; margin-top:8px; }
+  button.big:active { transform:translateY(3px); box-shadow:0 1px 0 #222; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .ov-card .round-no { display:inline-block; background:#222; color:#ffe066; border-radius:999px; padding:2px 14px; font-weight:900; }
+  .ov-card .secret { font-size:clamp(28px,5vw,48px); font-weight:900; color:#dc2626; letter-spacing:4px; margin:4px 0; text-shadow:0 3px 0 #fde68a; }
+  .ov-card.intro h3 { font-size:clamp(20px,3vw,30px); }
+  .gains { list-style:none; padding:0; margin:8px auto; max-width:320px; text-align:left; }
+  .gains li { display:flex; justify-content:space-between; padding:3px 8px; border-bottom:1px dashed #e7d3b5; }
+  .gains .plus { color:#16a34a; } .gains .zero { color:#94a3b8; }
+  .podium { display:flex; justify-content:center; align-items:flex-end; gap:10px; margin:10px 0 6px; }
+  .pod { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:80px; }
+  .pod img { width:30px; height:60px; image-rendering:pixelated; margin-bottom:2px; }
+  .pod .step { width:100%; border:3px solid #222; border-radius:8px 8px 0 0; display:grid; place-items:center; font-size:22px; }
+  .pod.p1 .step { height:64px; background:#fde68a; } .pod.p2 .step { height:44px; background:#e5e7eb; } .pod.p3 .step { height:30px; background:#fed7aa; }
+  .row-btns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+
+  .tools { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; background:#fff; border:3px solid var(--line); border-radius:10px; padding:8px; margin-top:10px; }
+  .tools.locked { opacity:.55; pointer-events:none; }
+  .tools .group { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+  .tools .color { width:26px; height:26px; padding:0; border-radius:50%; border:2px solid #222; }
+  .tools .color.sel { outline:3px solid #ff5a5f; outline-offset:2px; }
+  .tools .size { width:34px; height:34px; padding:0; display:grid; place-items:center; border-radius:8px; }
+  .tools .size i { display:block; background:#222; border-radius:50%; }
+  .tools .size.sel { background:#fde68a; }
+  .tools button.on { background:#222; color:#fff; }
+  .spectate { text-align:center; color:#64748b; margin-top:10px; font-size:14px; }
+
+  .chat { background:#fff; border:3px solid var(--line); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px; min-height:0; }
+  #dgChatLog { flex:1; min-height:240px; max-height:480px; overflow:auto; border:2px solid #e5e7eb; border-radius:8px; padding:6px; font-size:14px; background:#fafafa; }
+  @media (max-width:900px){ #dgChatLog { max-height:200px; min-height:140px; } }
+  .msg { padding:2px 0; word-break:break-all; }
+  .msg.system { color:#64748b; font-size:13px; }
+  .msg.correct { color:#15803d; font-weight:900; background:#dcfce7; border-radius:6px; padding:3px 6px; margin:2px 0; }
+  .msg.close { color:#c2410c; font-weight:bold; }
+  .msg.private { color:#7c3aed; }
+  .chat .send { display:flex; gap:6px; }
+  .chat .send input { min-width:0; }
+  .chat .send button { white-space:nowrap; flex-shrink:0; }
+  #dgToast { position:fixed; left:50%; bottom:24px; transform:translate(-50%, 30px); background:#222; color:#fff; padding:10px 18px; border-radius:999px;
+    opacity:0; transition:.25s; pointer-events:none; z-index:60; font-weight:bold; }
+  #dgToast.show { opacity:1; transform:translate(-50%,0); }
 </style>
 </head>
 <body>
-<header><h1>■ 色塊人大亂鬥</h1><span class="hint" id="status">設計你的角色</span></header>
+<header><h1>■ 色塊人宇宙都市</h1><span class="hint" id="status">設計你的角色</span></header>
 
 <!-- ===== 角色編輯器 ===== -->
 <div class="wrap" id="editorScreen">
@@ -90,14 +200,14 @@
       <div class="preview">
         <canvas id="previewCanvas" width="24" height="48" style="width:96px;height:192px"></canvas>
         <input type="text" id="nameInput" maxlength="12" placeholder="輸入暱稱">
-        <button class="primary" id="joinBtn" style="width:100%">開始遊戲 ▶</button>
-        <p class="hint">方向鍵 / WASD 移動，繞過樹木、牆壁和石頭，搶到 10 顆星星獲勝！</p>
+        <button class="primary" id="joinBtn" style="width:100%">進入宇宙都市 ▶</button>
+        <p class="hint">方向鍵 / WASD 移動，走進建築物就能玩遊戲！</p>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ===== 遊戲畫面 ===== -->
+<!-- ===== 可走動的場景（廣場、搶星星草原） ===== -->
 <div class="wrap hidden" id="gameScreen">
   <div class="game">
     <div>
@@ -108,19 +218,88 @@
       </div>
     </div>
     <div class="card board">
-      <strong>排行榜</strong>
+      <h2 class="zone-title" id="zoneTitle">宇宙廣場</h2>
+      <strong id="listTitle">在線玩家</strong>
       <ol id="scoreList"></ol>
       <strong>聊天</strong>
       <div id="chatLog"></div>
       <input type="text" id="chatInput" maxlength="80" placeholder="按 Enter 送出">
+      <button id="plazaBtn" class="hidden" style="margin-top:10px;width:100%">🏙️ 返回廣場</button>
       <button id="backBtn" style="margin-top:10px;width:100%">換角色</button>
     </div>
   </div>
 </div>
 
+<!-- ===== 你畫我猜：大廳 ===== -->
+<div class="wrap hidden" id="dgLobby">
+  <div class="scene">
+    <canvas class="bg" id="lobbyBg"></canvas>
+    <div class="lobby-sign">🎨 你畫我猜</div>
+    <div class="lobby-panel">
+      <h2>歡迎來到畫室！</h2>
+      <p class="sub">一人畫、大家猜，畫得像、猜得快就能得分</p>
+      <div class="opts">
+        <button class="opt pub" id="dgCreatePublic"><span class="ico">🏠</span><b>建立公開房間</b><span>自己開房，其他人可以隨機配對加入</span></button>
+        <button class="opt rnd" id="dgRandom"><span class="ico">🎲</span><b>隨機加入</b><span>自動加入有空位、還沒開始的公開房間</span></button>
+        <button class="opt pri" id="dgPrivate"><span class="ico">🔒</span><b>私人房間</b><span>建立有代碼的房間，或輸入代碼找朋友</span></button>
+      </div>
+      <div class="notice hidden" id="dgNone">
+        <p>目前沒有可加入的房間</p>
+        <button class="primary" id="dgNoneCreate">🏠 建立公開房間</button>
+      </div>
+      <div class="private-box hidden" id="dgPrivatePanel">
+        <button class="primary" id="dgCreatePrivate">🔒 建立私人房間（取得代碼）</button>
+        <div class="join"><input type="text" id="dgCodeInput" maxlength="4" placeholder="代碼" autocomplete="off"><button id="dgJoinCode">加入</button></div>
+      </div>
+      <div class="lobby-foot">
+        <span class="hint" id="dgOpenCount"></span>
+        <button id="dgExit">← 走出建築，回到廣場</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 你畫我猜：房間 ===== -->
+<div class="wrap hidden" id="dgRoom" style="max-width:1280px">
+  <div class="topbar">
+    <span id="dgRoomBadge"></span>
+    <span id="dgRound"></span>
+    <div id="dgWord"></div>
+    <div class="timer hidden" id="dgTimer"><b>0</b></div>
+  </div>
+  <div class="room">
+    <div>
+      <div class="scene">
+        <canvas class="bg" id="roomBg"></canvas>
+        <canvas id="dgBoard"></canvas>
+        <div class="board-ov hidden" id="dgOverlay"></div>
+      </div>
+      <div class="tools hidden" id="dgTools">
+        <div class="group" id="dgColors"></div>
+        <div class="group" id="dgSizes"></div>
+        <div class="group"><button id="dgPen">✏️ 畫筆</button><button id="dgEraser">🧽 橡皮擦</button></div>
+        <div class="group"><button id="dgUndo">↩️ 復原</button><button id="dgClear">🗑️ 清空</button></div>
+      </div>
+      <p class="spectate hidden" id="dgSpectate">👀 看畫板猜答案，在右邊輸入框搶答！</p>
+    </div>
+    <div class="chat">
+      <strong>💬 猜題區</strong>
+      <div id="dgChatLog"></div>
+      <div class="send"><input type="text" id="dgInput" maxlength="40" autocomplete="off"><button id="dgSend" class="primary">送出</button></div>
+      <button id="dgLeave">🚪 離開房間（回大廳）</button>
+    </div>
+  </div>
+</div>
+
+<div id="fade"></div>
+<div id="dgToast"></div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="shared.js"></script>
+<script src="props.js"></script>
+<script src="studio.js"></script>
 <script src="game.js"></script>
+<script src="dg.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const SW = 24, SH = 48;          // 角色圖尺寸
@@ -241,70 +420,14 @@ $('tabDraw').onclick = () => setMode('draw');
 redrawGrid(); setMode('block');
 try { $('nameInput').value = localStorage.getItem('bm_name') || ''; } catch (e) {}
 
-// ---------- 連線與遊戲（畫面由 game.js 負責） ----------
-const socket = io();
-let myId = null, sprites = {}, lastState = null;
-const keys = { up: false, down: false, left: false, right: false };
-
-$('joinBtn').onclick = () => {
-  if (mode === 'draw' && grid.every(r => r.every(c => !c))) { alert('角色是空白的，先畫點東西吧！'); return; }
+// 輸出角色圖給 app.js
+window.makeSprite = () => {
+  if (mode === 'draw' && grid.every(r => r.every(c => !c))) { alert('角色是空白的，先畫點東西吧！'); return null; }
   const c = document.createElement('canvas'); c.width = SW; c.height = SH;
   mode === 'block' ? renderBlock(c.getContext('2d')) : renderDraw(c.getContext('2d'));
-  const name = $('nameInput').value.trim() || '玩家' + Math.floor(Math.random() * 1000);
-  try { localStorage.setItem('bm_name', name); } catch (e) {}
-  socket.emit('join', { name, sprite: c.toDataURL('image/png') });
+  return c.toDataURL('image/png');
 };
-socket.on('joined', d => {
-  myId = d.id;
-  $('editorScreen').classList.add('hidden'); $('gameScreen').classList.remove('hidden');
-  $('status').textContent = '遊戲中 — 搶星星！';
-  Game.start(d, d.id, {
-    mask: () => (keys.up ? 1 : 0) | (keys.down ? 2 : 0) | (keys.left ? 4 : 0) | (keys.right ? 8 : 0),
-    send: list => socket.emit('cmds', list)
-  });
-});
-socket.on('errorMsg', m => alert(m));
-socket.on('map', m => Game.setMap(m));
-socket.on('sprites', map => { sprites = map; Game.setSprites(map); });
-socket.on('state', s => { lastState = s; Game.setState(s); updateBoard(); });
-socket.on('chat', m => {
-  const div = document.createElement('div');
-  const b = document.createElement('b'); b.textContent = m.name + '：';
-  div.append(b, document.createTextNode(m.text));
-  $('chatLog').appendChild(div); $('chatLog').scrollTop = 1e9;
-});
-$('chatInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.value.trim()) { socket.emit('chat', e.target.value); e.target.value = ''; }
-});
-$('backBtn').onclick = () => location.reload();
-
-// 鍵盤
-const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
-function setKey(k, v) { keys[k] = v; }
-addEventListener('keydown', e => {
-  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-  if (KEYMAP[e.code]) { e.preventDefault(); setKey(KEYMAP[e.code], true); }
-});
-addEventListener('keyup', e => { if (KEYMAP[e.code]) setKey(KEYMAP[e.code], false); });
-addEventListener('blur', () => Object.keys(keys).forEach(k => setKey(k, false)));
-// 觸控方向鍵
-document.querySelectorAll('#pad button').forEach(b => {
-  const k = b.dataset.k;
-  b.addEventListener('pointerdown', e => { e.preventDefault(); setKey(k, true); });
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, () => setKey(k, false)));
-});
-
-function updateBoard() {
-  const list = [...lastState.players].sort((a, b) => b.score - a.score);
-  $('scoreList').innerHTML = '';
-  for (const p of list) {
-    const li = document.createElement('li');
-    const im = document.createElement('img'); if (sprites[p.id]) im.src = sprites[p.id].sprite;
-    const t = document.createElement('span');
-    t.textContent = `${sprites[p.id] ? sprites[p.id].name : '?'}${p.id === myId ? '（你）' : ''} — ${p.score}`;
-    li.append(im, t); $('scoreList').appendChild(li);
-  }
-}
 </script>
+<script src="app.js"></script>
 </body>
 </html>

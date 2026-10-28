@@ -9,7 +9,7 @@
   let W = 960, H = 600, PW = 24, PH = 48, VW = 0, VH = 0;
   const stage = document.getElementById('stage');
   const ctx = stage.getContext('2d');
-  let k = 1, myId = null, state = null, sprites = {}, obstacles = [], drawables = [], ground = null;
+  let k = 1, myId = null, state = null, sprites = {}, obstacles = [], allObjects = [], portals = [], theme = 'meadow', drawables = [], ground = null;
   const chars = {}, disp = {}, particles = [], floaters = [];
   let prevStars = new Map(), skipBurst = false, lastT = 0;
 
@@ -86,6 +86,23 @@
     const bg = g.createLinearGradient(0, 0, 0, VH);
     bg.addColorStop(0, '#22384f'); bg.addColorStop(1, '#0f1823');
     g.fillStyle = bg; g.fillRect(0, 0, VW, VH);
+    if (theme === 'plaza') {
+      // 宇宙都市的天空：星空、行星、遠方的城市剪影
+      const sky = g.createLinearGradient(0, 0, 0, top);
+      sky.addColorStop(0, '#1a1240'); sky.addColorStop(1, '#3b2a6b');
+      g.fillStyle = sky; g.fillRect(0, 0, VW, top + 2);
+      for (let i = 0; i < 90; i++) { g.fillStyle = `rgba(255,255,255,${0.3 + r() * 0.7})`; g.fillRect(r() * W, r() * top * 0.8, r() < 0.15 ? 2 : 1, r() < 0.15 ? 2 : 1); }
+      g.fillStyle = '#ffb4a2'; circle(g, 120, 24, 13); g.fillStyle = 'rgba(255,255,255,.35)'; circle(g, 116, 20, 5);
+      g.strokeStyle = 'rgba(255,220,200,.8)'; g.lineWidth = 2.5; g.beginPath(); g.ellipse(120, 24, 24, 6, -0.3, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = '#9be7ff'; circle(g, 860, 18, 7);
+      let x = 0;
+      while (x < W) {
+        const bw = 26 + r() * 40, bh = 14 + r() * 34;
+        g.fillStyle = r() < 0.5 ? '#2a1f55' : '#33276a'; g.fillRect(x, top - bh, bw, bh);
+        for (let wy = top - bh + 5; wy < top - 4; wy += 7) for (let wx = x + 4; wx < x + bw - 4; wx += 7) if (r() < 0.35) { g.fillStyle = r() < 0.5 ? '#ffe9a8' : '#9be7ff'; g.fillRect(wx, wy, 2.5, 3); }
+        x += bw + 2 + r() * 6;
+      }
+    } else
     // 遠景山丘
     [['#2c4a5e', 0.55, 26], ['#2f5a4a', 0.8, 18]].forEach(([col, base, amp], li) => {
       g.fillStyle = col; g.beginPath(); g.moveTo(0, top);
@@ -105,6 +122,8 @@
 
     // 草地
     g.save(); g.beginPath(); g.rect(0, top, W, H); g.clip();
+    if (theme === 'plaza') Props.plazaGround(g, W, H, top, r);
+    else {
     g.fillStyle = '#84c75a'; g.fillRect(0, top, W, H);
     for (let i = 0; i < 46; i++) {
       const x = r() * W, y = top + r() * H, rad = 40 + r() * 110;
@@ -128,6 +147,7 @@
       g.fillStyle = flowers[i % 4]; circle(g, x, y, 1.7);
       g.fillStyle = 'rgba(255,190,0,.9)'; circle(g, x, y, 0.6);
     }
+    }
     const edge = (x0, y0, x1, y1, a) => {
       const gr = g.createLinearGradient(x0, y0, x1, y1);
       gr.addColorStop(0, `rgba(0,0,0,${a})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
@@ -138,8 +158,21 @@
     // 靜態物件的投影（光從左上來，影子落在右下）
     const [sc, sg] = mk(VW, VH, Math.min(2, k));
     sg.fillStyle = '#000'; sg.translate(0, top);
-    for (const o of obstacles) {
-      if (o.type === 'wall') {
+    const boxShadow = (o, hh) => {
+      const sx = hh * 0.55, sy = hh * 0.3;
+      sg.beginPath(); sg.moveTo(o.x, o.y); sg.lineTo(o.x + o.w, o.y); sg.lineTo(o.x + o.w + sx, o.y + sy);
+      sg.lineTo(o.x + o.w + sx, o.y + o.d + sy); sg.lineTo(o.x + sx, o.y + o.d + sy); sg.lineTo(o.x, o.y + o.d);
+      sg.closePath(); sg.fill();
+    };
+    for (const o of allObjects) {
+      if (o.type === 'building') boxShadow(o, o.h * 0.6);
+      else if (o.type === 'pillar') boxShadow(o, 60);
+      else if (o.type === 'lot') boxShadow({ x: o.x, y: o.y + o.d - 4, w: o.w, d: 4 }, 22);
+      else if (o.type === 'fountain') ellipse(sg, o.x + o.w / 2 + 8, o.y + o.d / 2 + 6, o.w / 2 + 4, o.d / 2 + 4);
+      else if (o.type === 'bench') ellipse(sg, o.x + o.w / 2 + 4, o.y + o.d, o.w / 2 + 2, 5);
+      else if (o.type === 'lamp') ellipse(sg, o.x + 22, o.y + o.d + 8, 22, 4);
+      else if (o.type === 'gate') continue;
+      else if (o.type === 'wall') {
         const sx = WALL_H * 0.55, sy = WALL_H * 0.3;
         sg.beginPath(); sg.moveTo(o.x, o.y); sg.lineTo(o.x + o.w, o.y); sg.lineTo(o.x + o.w + sx, o.y + sy);
         sg.lineTo(o.x + o.w + sx, o.y + o.d + sy); sg.lineTo(o.x + sx, o.y + o.d + sy); sg.lineTo(o.x, o.y + o.d);
@@ -281,7 +314,14 @@
 
   function buildMap() {
     drawables = [];
-    for (const o of obstacles) {
+    for (const o of allObjects) {
+      if (o.type === 'building') { drawables.push(Props.drawGuessBuilding(o)); continue; }
+      if (o.type === 'pillar') { drawables.push(Props.pillar(o)); continue; }
+      if (o.type === 'gate') { drawables.push(Props.starGate(o)); continue; }
+      if (o.type === 'lot') { drawables.push(Props.lot(o)); continue; }
+      if (o.type === 'fountain') { drawables.push(Props.fountain(o)); continue; }
+      if (o.type === 'bench') { drawables.push(Props.bench(o)); continue; }
+      if (o.type === 'lamp') { drawables.push(Props.lamp(o)); continue; }
       if (o.type === 'wall') {
         if (o.d > o.w) { // 直向牆切成小段，前後排序才會正確
           const SEG = 18;
@@ -392,6 +432,32 @@
     floaters.push({ x, y: y - 30, life: 1 });
   }
 
+  // ---------- 入口光圈 ----------
+  function drawPortal(po, t) {
+    const cx = po.x + po.w / 2, cy = po.y + po.d / 2, pulse = 0.8 + Math.sin(t * 0.004) * 0.2;
+    const rx = po.w / 2 + 26, ry = po.d / 2 + 14;
+    // 往上的光柱
+    const beam = ctx.createLinearGradient(0, cy - 70, 0, cy);
+    beam.addColorStop(0, hexA(po.color, 0)); beam.addColorStop(1, hexA(po.color, 0.32 * pulse));
+    ctx.fillStyle = beam; ctx.fillRect(cx - po.w / 2, cy - 70, po.w, 70);
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(1, ry / rx);
+    const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    gr.addColorStop(0, hexA('#ffffff', 0.85 * pulse)); gr.addColorStop(0.35, hexA(po.color, 0.8 * pulse)); gr.addColorStop(0.7, hexA(po.color, 0.35 * pulse)); gr.addColorStop(1, hexA(po.color, 0));
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = hexA('#ffffff', 0.55 * pulse); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, rx * (0.55 + ((t * 0.0006) % 0.45)), 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    for (let i = 0; i < 8; i++) { // 往上飄的光點
+      const ph = (t * 0.0005 + i / 8) % 1, sx = cx + Math.sin(i * 2.4 + t * 0.001) * po.w * 0.4;
+      ctx.fillStyle = hexA(i % 2 ? '#ffffff' : po.color, (1 - ph) * 0.9);
+      ctx.fillRect(sx - 1.5, cy - ph * 46 - 1.5, 3, 3);
+    }
+  }
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${Math.max(0, Math.min(1, a))})`;
+  }
+
   // ---------- 繪製角色 ----------
   function animate(d, id, dt) {
     const sp = Math.min(1, Math.hypot(d.vx || 0, d.vy || 0) / Move.MAX_SPEED);
@@ -433,7 +499,7 @@
   function drawLabel(p, leader) {
     const d = disp[p.id]; if (!d) return;
     const name = sprites[p.id] ? sprites[p.id].name : '';
-    const txt = `${leader ? '👑 ' : ''}${name}  ${p.score}`;
+    const txt = theme === 'plaza' ? name : `${leader ? '👑 ' : ''}${name}  ${p.score}`;
     ctx.font = '600 11px "Noto Sans TC", system-ui, sans-serif';
     const tw = ctx.measureText(txt).width + 14, ax = d.x, x = Math.max(tw / 2 + 4, Math.min(W - tw / 2 - 4, d.x)), y = d.y - PH - CAP - 14 - (d.bob || 0);
     const mine = p.id === myId;
@@ -520,6 +586,8 @@
       const b = d.bob || 0;
       ellipse(ctx, d.x + 3, d.y + 1, 13 - b * 0.8, 5 - b * 0.3);
     }
+    // 建築入口的發光區域
+    for (const po of portals) drawPortal(po, t);
     for (let i = dust.length - 1; i >= 0; i--) {
       const q = dust[i]; q.life -= dt * 2.2; q.x += q.vx * dt; q.r += dt * 9;
       if (q.life <= 0) { dust.splice(i, 1); continue; }
@@ -574,6 +642,20 @@
     const leaders = state.players.filter(p => p.score === best);
     for (const p of state.players) drawLabel(p, best > 0 && leaders.length === 1 && p.score === best);
 
+    // 靠近入口時的提示
+    const meD = disp[myId];
+    if (meD) for (const po of portals) {
+      const cx = po.x + po.w / 2, cy = po.y + po.d / 2;
+      if (Math.hypot(meD.x - cx, meD.y - cy) < 95) {
+        const txt = `⬆ 走進去：${po.title}`;
+        ctx.font = `800 13px "Noto Sans TC", system-ui, sans-serif`;
+        const tw = ctx.measureText(txt).width + 22, bob = Math.sin(t * 0.006) * 2, by = po.y + po.d + 30 + bob;
+        ctx.fillStyle = 'rgba(20,16,40,.85)'; roundRect(ctx, cx - tw / 2, by - 12, tw, 24, 12); ctx.fill();
+        ctx.strokeStyle = po.color; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, cx, by + 1);
+      }
+    }
+
     // 勝利畫面
     if (state.winner) {
       ctx.setTransform(k, 0, 0, k, 0, 0);
@@ -593,19 +675,25 @@
 
   // ---------- 對外介面 ----------
   window.Game = {
-    _disp: disp, // 除錯用
+    _disp: disp, _me: () => disp[myId], // 除錯／自動測試用
     start(cfg, id, hooks) {
       W = cfg.W; H = cfg.H; PW = cfg.PW; PH = cfg.PH; myId = id;
       if (hooks) io = hooks;
+      allObjects = []; obstacles = []; portals = []; drawables = []; ground = null; state = null;
       local = null; pending = []; snaps = []; clockOffset = null; renderOffset = null; acc = 0; errX = errY = 0;
       VW = W; VH = PAD_TOP + H + CLIFF;
       resize();
       if (obstacles.length) buildMap();
     },
-    setMap(list) {
-      obstacles = list || []; skipBurst = true;
+    setMap(m) {
+      allObjects = (m && m.obstacles) || [];
+      obstacles = allObjects.filter(o => o.solid !== false);   // 只有會擋路的才參與碰撞
+      portals = (m && m.portals) || [];
+      theme = (m && m.theme) || 'meadow';
+      skipBurst = true;
       if (VW) buildMap();
     },
+    stop() { state = null; local = null; pending = []; snaps = []; },
     setSprites(map) {
       sprites = map;
       for (const [id, s] of Object.entries(map)) {
