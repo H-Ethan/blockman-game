@@ -21,7 +21,8 @@
   let prevPos = null;           // 上一個物理步的位置（高更新率螢幕用來補間）
   let pending = [];             // 已送出、伺服器尚未確認的指令
   let seq = 0, acc = 0, errX = 0, errY = 0;
-  let snaps = [], clockOffset = null;
+  let snaps = [], clockOffset = null, renderOffset = null;
+  const dust = [];
 
   // ---------- 小工具 ----------
   const rng = seed => {
@@ -48,20 +49,39 @@
     g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
   }
 
+  let quality = 1;            // 依效能自動調整的解析度倍率（0.5 ~ 1）
   function resize() {
     if (!VW) return;
     const cssW = stage.getBoundingClientRect().width || VW;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    stage.width = Math.round(cssW * dpr);
-    stage.height = Math.round(cssW * dpr * VH / VW);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * quality;
+    const w = Math.max(320, Math.round(cssW * dpr));
+    if (w === stage.width && ground) return;
+    stage.width = w;
+    stage.height = Math.round(w * VH / VW);
     k = stage.width / VW;
+    if (obstacles.length) buildGround();
   }
-  addEventListener('resize', resize);
+  let resizeTimer = 0;
+  addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 150); });
+
+  // 效能監控：持續明顯掉幀才降低解析度（最多 3 次、只降不升），避免反覆重畫背景造成頓挫
+  let perfAvg = 16.7, perfCheck = 0, perfDrops = 0;
+  function watchPerf(interval, now) {
+    if (interval > 0 && interval < 200) perfAvg += (interval - perfAvg) * 0.03;
+    if (!perfCheck) perfCheck = now + 3000;            // 剛進場先讓它穩定一下
+    if (now < perfCheck) return;
+    perfCheck = now + 4000;
+    if (perfAvg > 25 && perfDrops < 3) {
+      perfDrops++; quality = Math.max(0.5, quality * 0.75); resize();
+      perfAvg = 16.7;
+    }
+  }
 
   // ---------- 地面（預先繪製一次） ----------
   function buildGround() {
-    const RS = 2, r = rng(20261026), top = PAD_TOP, cy = PAD_TOP + H;
-    const [c, g] = mk(VW, VH, RS);
+    const r = rng(20261026), top = PAD_TOP, cy = PAD_TOP + H;
+    const c = document.createElement('canvas'); c.width = stage.width; c.height = stage.height;
+    const g = c.getContext('2d'); g.scale(k, k);
 
     const bg = g.createLinearGradient(0, 0, 0, VH);
     bg.addColorStop(0, '#22384f'); bg.addColorStop(1, '#0f1823');
@@ -116,7 +136,7 @@
     edge(0, top, 0, top + 46, 0.25); edge(0, cy, 0, cy - 24, 0.12); edge(0, 0, 34, 0, 0.18); edge(W, 0, W - 34, 0, 0.18);
 
     // 靜態物件的投影（光從左上來，影子落在右下）
-    const [sc, sg] = mk(VW, VH, RS);
+    const [sc, sg] = mk(VW, VH, Math.min(2, k));
     sg.fillStyle = '#000'; sg.translate(0, top);
     for (const o of obstacles) {
       if (o.type === 'wall') {
@@ -327,6 +347,13 @@
   }
 
   // ---------- 星星與粒子 ----------
+  const GLOW = (() => {
+    const [c, g] = mk(56, 56, 2);
+    const gr = g.createRadialGradient(28, 28, 0, 28, 28, 28);
+    gr.addColorStop(0, 'rgba(255,225,110,.55)'); gr.addColorStop(1, 'rgba(255,225,110,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 56, 56);
+    return c;
+  })();
   function starPath(g, R, r) {
     g.beginPath();
     for (let i = 0; i < 10; i++) {
@@ -338,9 +365,7 @@
   const starZ = (s, t) => 18 + Math.sin(t * 0.004 + hashf(s.id) * 6) * 4;
   function drawStar(s, t) {
     const z = starZ(s, t), x = s.x, y = s.y - z, ph = hashf(s.id) * 6;
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, 28);
-    glow.addColorStop(0, 'rgba(255,225,110,.55)'); glow.addColorStop(1, 'rgba(255,225,110,0)');
-    ctx.fillStyle = glow; ctx.fillRect(x - 28, y - 28, 56, 56);
+    ctx.drawImage(GLOW, x - 28, y - 28, 56, 56);
     ctx.save(); ctx.translate(x, y);
     ctx.scale(Math.max(0.18, Math.abs(Math.cos(t * 0.003 + ph))), 1);
     ctx.translate(0, 2.2); starPath(ctx, 10.5, 4.6); ctx.fillStyle = '#b06a06'; ctx.fill();
@@ -368,12 +393,30 @@
   }
 
   // ---------- 繪製角色 ----------
+  function animate(d, id, dt) {
+    const sp = Math.min(1, Math.hypot(d.vx || 0, d.vy || 0) / Move.MAX_SPEED);
+    const e = x => 1 - Math.exp(-dt * x);
+    if (d.amp === undefined) { d.amp = sp; d.face = d.facing || 1; d.lean = 0; d.walk = 0; d.foot = 0; }
+    d.amp += (sp - d.amp) * e(9);                                    // 晃動幅度隨速度漸變
+    d.lean += (((d.vx || 0) / Move.MAX_SPEED) * 0.07 - d.lean) * e(10); // 前傾漸變
+    const tf = (d.facing || 1) < 0 ? -1 : 1;                          // 轉身：約 0.15 秒翻過去
+    d.face = tf > d.face ? Math.min(tf, d.face + dt * 13) : Math.max(tf, d.face - dt * 13);
+    d.walk += Math.hypot(d.vx || 0, d.vy || 0) * dt * 0.11;
+    const foot = Math.floor(d.walk / Math.PI);                        // 每踩一步揚起一點灰塵
+    if (foot !== d.foot) { d.foot = foot; if (d.amp > 0.45) puff(d.x - (d.vx || 0) * 0.04, d.y + 1, 2); }
+    if (Math.abs(tf - d.face) > 1.6 && d.amp > 0.3 && !d.turnPuff) { d.turnPuff = true; puff(d.x, d.y + 1, 4); }
+    if (Math.abs(tf - d.face) < 0.01) d.turnPuff = false;
+  }
+  function puff(x, y, n) {
+    for (let i = 0; i < n && dust.length < 80; i++)
+      dust.push({ x: x + (Math.random() - 0.5) * 8, y: y + (Math.random() - 0.5) * 3, r: 2 + Math.random() * 2,
+                  vx: (Math.random() - 0.5) * 18, life: 1 });
+  }
   function charMotion(d, id, t) {
-    const ph = hashf(id) * 10, sp = Math.min(1, Math.hypot(d.vx || 0, d.vy || 0) / Move.MAX_SPEED);
-    const idle = { bob: 0, sx: 1, sy: 1 + Math.sin(t * 0.004 + ph) * 0.018 };
-    if (sp < 0.08) return idle;
-    const s = Math.abs(Math.sin(d.walk || 0));
-    return { bob: s * 3.2 * sp, sx: 1 - s * 0.035 * sp, sy: 1 + s * 0.035 * sp + (1 - sp) * (idle.sy - 1), lean: (d.vx || 0) / Move.MAX_SPEED * 0.06 };
+    const ph = hashf(id) * 10, amp = d.amp || 0;
+    const s2 = Math.sin(d.walk || 0) ** 2;                             // sin² 在落地點是圓滑的，不會「頓」一下
+    const breathe = Math.sin(t * 0.004 + ph) * 0.018 * (1 - amp);
+    return { bob: s2 * 3 * amp, sx: 1 - s2 * 0.035 * amp, sy: 1 + s2 * 0.035 * amp + breathe, lean: d.lean || 0 };
   }
   function drawPlayer(p, t, alpha) {
     const ch = chars[p.id], d = disp[p.id];
@@ -383,7 +426,7 @@
     ctx.save(); ctx.globalAlpha = alpha;
     ctx.translate(d.x, d.y - m.bob);
     if (m.lean) ctx.rotate(m.lean);
-    ctx.scale((d.facing < 0 ? -1 : 1) * m.sx, m.sy);
+    ctx.scale((Math.abs(d.face) < 0.08 ? 0.08 * Math.sign(d.face || 1) : d.face) * m.sx, m.sy);
     ctx.drawImage(ch.c, -dw / 2, -dh + ch.pad / ch.s, dw, dh);
     ctx.restore();
   }
@@ -406,6 +449,7 @@
     requestAnimationFrame(frame);
     if (!state || !ground || !VW) return;
     const rawDt = lastT ? (t - lastT) / 1000 : 0; lastT = t;
+    watchPerf(rawDt * 1000, t);
     const dt = Math.min(0.05, rawDt);
 
     // 1) 自己：固定步長本機預測，按下就動，不必等伺服器回應
@@ -434,7 +478,12 @@
 
     // 2) 其他玩家：在兩個伺服器快照之間依時間插值
     if (clockOffset !== null && snaps.length) {
-      const rt = performance.now() + clockOffset - INTERP_MS;
+      if (renderOffset === null || Math.abs(clockOffset - renderOffset) > 250) renderOffset = clockOffset;
+      else {
+        const lim = rawDt * 1000 * 0.1;
+        renderOffset += Math.max(-lim, Math.min(lim, clockOffset - renderOffset));
+      }
+      const rt = performance.now() + renderOffset - INTERP_MS;
       let i = snaps.length - 1;
       while (i > 0 && snaps[i].t > rt) i--;
       const A = snaps[i], B = snaps[i + 1];
@@ -455,16 +504,13 @@
         d.x = q.x; d.y = q.y; d.vx = q.vx || 0; d.vy = q.vy || 0; d.facing = q.facing;
       }
     }
-    for (const p of state.players) {
-      const d = disp[p.id];
-      if (d) d.walk = (d.walk || 0) + Math.hypot(d.vx || 0, d.vy || 0) * dt * 0.1;
-    }
+    for (const p of state.players) if (disp[p.id]) animate(disp[p.id], p.id, dt);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, stage.width, stage.height);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(ground, 0, 0); // 與畫布同尺寸，直接貼上不縮放（最省效能）
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(ground, 0, 0, VW, VH);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
     ctx.translate(0, PAD_TOP);
 
     // 動態影子
@@ -473,6 +519,11 @@
       const d = disp[p.id]; if (!d) continue;
       const b = d.bob || 0;
       ellipse(ctx, d.x + 3, d.y + 1, 13 - b * 0.8, 5 - b * 0.3);
+    }
+    for (let i = dust.length - 1; i >= 0; i--) {
+      const q = dust[i]; q.life -= dt * 2.2; q.x += q.vx * dt; q.r += dt * 9;
+      if (q.life <= 0) { dust.splice(i, 1); continue; }
+      ctx.fillStyle = `rgba(236,226,196,${0.5 * q.life})`; ellipse(ctx, q.x, q.y - (1 - q.life) * 4, q.r, q.r * 0.6);
     }
     ctx.fillStyle = 'rgba(0,0,0,.2)';
     for (const s of state.stars) { const z = starZ(s, t); ellipse(ctx, s.x + 2, s.y + 1, 10 - z * 0.15, 4 - z * 0.05); }
@@ -546,7 +597,7 @@
     start(cfg, id, hooks) {
       W = cfg.W; H = cfg.H; PW = cfg.PW; PH = cfg.PH; myId = id;
       if (hooks) io = hooks;
-      local = null; pending = []; snaps = []; clockOffset = null; acc = 0; errX = errY = 0;
+      local = null; pending = []; snaps = []; clockOffset = null; renderOffset = null; acc = 0; errX = errY = 0;
       VW = W; VH = PAD_TOP + H + CLIFF;
       resize();
       if (obstacles.length) buildMap();
