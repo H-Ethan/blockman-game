@@ -1,125 +1,174 @@
-// 色塊人宇宙都市 - 伺服器
-// 區域：宇宙廣場（plaza）。城市重新規劃中，目前廣場上沒有遊戲建築；
-// 你畫我猜（dg）的遊戲程式仍保留，之後蓋好新建築、加上入口就能再接上
+// 色塊人城市 - 伺服器
+// 共用系統：角色、城市移動、建築入口、房間（server/core）
+// 個別桌遊：誰是臥底（server/games/undercover）
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
-const Move = require('./public/shared.js');
-const World = require('./server/world');
-const DrawGuess = require('./server/drawguess');
-const { PLAZA_W, PLAZA_H, plazaMap } = require('./server/maps');
+const Move = require('./public/js/shared/move.js');
+const CITY = require('./public/js/shared/citymap.js');
+const UC = require('./public/js/shared/uc-rules.js');
+const City = require('./server/core/city');
+const RoomManager = require('./server/core/rooms');
+const { checkProfile } = require('./server/core/filter');
+const Undercover = require('./server/games/undercover/game');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e5 });
+const io = new Server(server, { maxHttpBufferSize: 2e4, pingInterval: 8000, pingTimeout: 7000 });
 app.use(express.static(__dirname + '/public'));
+app.get('/healthz', (req, res) => res.send('ok'));
 
-const players = new Map();   // socket.id -> player
+const HOLD_MS = UC.SEAT_HOLD_SEC * 1000 * (+process.env.UC_TIME_SCALE || 1);
+const sessions = new Map();   // token → 玩家
+const byId = new Map();       // 公開 id → 玩家（token 只存在伺服器與本人瀏覽器）
 
-// ---------- 宇宙廣場 ----------
-const plaza = new World(io, {
-  id: 'plaza', title: '色塊人宇宙廣場', W: PLAZA_W, H: PLAZA_H, theme: 'plaza',
-  init(w) { Object.assign(w, plazaMap()); },
-  onPortal(p, portal) {
-    if (portal.id === 'drawguess') enterDrawGuess(p);
+// ---------- 區域 ----------
+const city = new City(io, { onPortal: (p, portal) => { if (portal.id === 'undercover') enterLobby(p); } });
+const uc = new RoomManager(io, {
+  Game: Undercover, kind: 'undercover',
+  hooks: {
+    enterRoom: p => { uc.watch(p, false); setZone(p, 'room'); },
   },
 });
-const PLAZA_SPAWN = { x: 480, y: 520, facing: 1 };
-const exitOf = id => { const po = plaza.portals.find(p => p.id === id); return po ? po.exit : PLAZA_SPAWN; };
+const portalExit = id => { const po = CITY.portals.find(x => x.id === id); return po ? po.exit : CITY.spawn; };
 
-const worlds = { plaza };
-
-// ---------- 你畫我猜 ----------
-const dg = new DrawGuess(io, {});
-
-// ---------- 區域切換 ----------
-function leaveZone(p) {
-  if (worlds[p.zone]) worlds[p.zone].remove(p);
-  else if (p.zone === 'dg') dg.leave(p, true);
-  p.zone = null;
+function setZone(p, zone, extra) {
+  p.zone = zone;
+  p.epoch++;
+  p.zoneAt = Date.now();
+  if (p.online) p.socket.emit('zone', { zone, epoch: p.epoch, ...(extra || {}) });
 }
-function enterWorld(p, w, spawn) {
-  leaveZone(p);
-  p.zone = w.id; p.epoch++;
-  p.socket.emit('zone', { kind: 'world', cfg: w.cfg(), epoch: p.epoch });
-  w.add(p, spawn);
-  w.sendMap(p);
+function leaveCurrent(p) {
+  if (p.zone === 'city') city.remove(p);
+  if (p.zone === 'lobby') uc.watch(p, false);
 }
-function enterDrawGuess(p) {
-  leaveZone(p);
-  p.zone = 'dg'; p.epoch++;
-  p.socket.emit('zone', { kind: 'dg', title: '你畫我猜', epoch: p.epoch });
-  dg.enterLobby(p);
+function enterCity(p, pos) {
+  leaveCurrent(p);
+  setZone(p, 'city');
+  const s = city.add(p, pos);
+  p.socket.emit('city:spawn', { x: s.x, y: s.y, epoch: p.epoch });
+}
+function enterLobby(p) {
+  leaveCurrent(p);
+  setZone(p, 'lobby', { building: 'undercover' });
+  uc.watch(p, true);
+  uc.sendList(p);
 }
 
-const spriteMap = () => Object.fromEntries([...players.values()].map(p => [p.id, { sprite: p.sprite, name: p.name }]));
+// ---------- 連線 ----------
+const TOKEN_RE = /^[a-f0-9]{32}$/;
+function bindSocket(p, socket) {
+  if (p.socket && p.socket !== socket && p.socket.connected) {
+    p.socket.emit('replaced');            // 同一個角色在別的分頁開啟
+    p.socket.data.replaced = true;
+    p.socket.disconnect(true);
+  }
+  p.socket = socket;
+  socket.data.p = p;
+  p.online = true;
+  p.discAt = 0;
+}
+
+function resume(p) {
+  p.socket.emit('session', { id: p.id, profile: p.profile });
+  if (p.zone === 'room' && uc.onReconnect(p)) { setZone(p, 'room'); uc.flush(); return; }
+  if (p.zone === 'lobby') return enterLobby(p);
+  enterCity(p, p.cityPos);
+}
 
 io.on('connection', socket => {
-  const me = () => players.get(socket.id);
+  const me = () => socket.data.p;
 
-  socket.on('join', data => {
-    if (players.has(socket.id)) return;
-    const sprite = data && data.sprite;
-    if (typeof sprite !== 'string' || !sprite.startsWith('data:image/png;base64,') || sprite.length > 60000) {
-      socket.emit('errorMsg', '角色圖片格式錯誤');
-      return;
-    }
-    const name = String((data && data.name) || '玩家').trim().slice(0, 12) || '玩家';
-    const p = { id: socket.id, socket, name, sprite, zone: null, epoch: 0, score: 0, dgRoom: null };
-    players.set(socket.id, p);
-    socket.emit('joined', { id: socket.id });
-    io.emit('sprites', spriteMap());
-    enterWorld(p, plaza, { x: 480 + (Math.random() - 0.5) * 120, y: 520 + (Math.random() - 0.5) * 30, facing: 1 });
-    io.to(plaza.room).emit('chat', { name: '系統', text: `${name} 來到了宇宙廣場` });
+  socket.on('resume', d => {
+    const token = d && d.token;
+    const p = TOKEN_RE.test(token || '') && sessions.get(token);
+    if (!p) return socket.emit('resume:none');
+    bindSocket(p, socket);
+    resume(p);
   });
 
-  socket.on('cmds', msg => { const p = me(); if (p && worlds[p.zone]) worlds[p.zone].cmds(p, msg); });
-  socket.on('toPlaza', () => {
-    const p = me(); if (!p || p.zone === 'plaza') return;
-    const from = p.zone;
-    enterWorld(p, plaza, exitOf(from === 'dg' ? 'drawguess' : from));
+  socket.on('hello', d => {
+    const token = d && d.token;
+    if (!TOKEN_RE.test(token || '')) return socket.emit('hello:error', { text: '連線資料錯誤，請重新整理頁面' });
+    const chk = checkProfile(d.profile);
+    if (chk.error) return socket.emit('hello:error', { text: chk.error });
+    let p = sessions.get(token);
+    if (!p) {
+      p = { id: crypto.randomBytes(5).toString('hex'), token, profile: chk.profile, socket: null, online: false,
+        zone: null, epoch: 0, cityPos: null, roomCode: null };
+      sessions.set(token, p); byId.set(p.id, p);
+    } else p.profile = chk.profile;
+    bindSocket(p, socket);
+    p.socket.emit('session', { id: p.id, profile: p.profile });
+    if (p.zone === 'room' && uc.onReconnect(p)) { setZone(p, 'room'); return; }
+    enterCity(p, p.cityPos || { x: CITY.spawn.x + (Math.random() - 0.5) * 120, y: CITY.spawn.y });
   });
 
-  socket.on('chat', text => {
-    const p = me();
-    if (!p || !worlds[p.zone] || typeof text !== 'string') return;
-    const t = text.trim().slice(0, 80);
-    if (t) io.to(worlds[p.zone].room).emit('chat', { name: p.name, text: t });
+  // 在城市裡修改角色
+  socket.on('profile', raw => {
+    const p = me(); if (!p) return;
+    const chk = checkProfile(raw);
+    if (chk.error) return socket.emit('hello:error', { text: chk.error });
+    p.profile = chk.profile;
+    socket.emit('session', { id: p.id, profile: p.profile });
+    if (p.zone === 'city') city.rosterDirty = true;
   });
 
-  // 你畫我猜
-  const onDg = (ev, fn) => socket.on(ev, arg => { const p = me(); if (p && p.zone === 'dg') fn(p, arg); });
-  onDg('dg:create', (p, a) => dg.create(p, a && a.private));
-  onDg('dg:random', p => dg.random(p));
-  onDg('dg:join', (p, code) => dg.joinCode(p, code));
-  onDg('dg:leave', p => dg.leave(p));
-  onDg('dg:settings', (p, s) => dg.settings(p, s));
-  onDg('dg:ready', (p, v) => dg.ready(p, v));
-  onDg('dg:start', p => dg.start(p));
-  onDg('dg:again', p => dg.again(p));
-  onDg('dg:op', (p, o) => dg.op(p, o));
-  onDg('dg:guess', (p, t) => dg.guess(p, t));
+  // 城市
+  socket.on('city:cmd', msg => { const p = me(); if (p && p.zone === 'city') city.cmds(p, msg); });
+  socket.on('city:chat', t => { const p = me(); if (p && p.zone === 'city') city.chat(p, t); });
+
+  // 大廳
+  const inLobby = fn => (...a) => { const p = me(); if (p && p.zone === 'lobby') fn(p, ...a); };
+  socket.on('lobby:exit', inLobby(p => enterCity(p, portalExit('undercover'))));
+  socket.on('lobby:list', inLobby(p => uc.sendList(p)));
+  socket.on('room:create', inLobby((p, d) => uc.create(p, d)));
+  socket.on('room:join', inLobby((p, d) => uc.join(p, d && d.code, d && d.password)));
+  socket.on('room:random', inLobby(p => uc.random(p)));
+
+  // 房間
+  const inRoom = fn => (...a) => { const p = me(); if (p && p.zone === 'room') fn(p, ...a); };
+  socket.on('room:ready', inRoom((p, v) => uc.ready(p, v)));
+  socket.on('room:settings', inRoom((p, d) => uc.settings(p, d)));
+  socket.on('room:start', inRoom(p => uc.start(p)));
+  socket.on('room:again', inRoom(p => uc.again(p)));
+  socket.on('room:chat', inRoom((p, t) => uc.chat(p, t)));
+  socket.on('room:leave', inRoom((p, d) => {
+    uc.removeMember(p, 'leave');
+    if (d && d.toCity) enterCity(p, portalExit('undercover')); else enterLobby(p);
+  }));
+  for (const type of ['confirm', 'describe', 'vote', 'guess', 'skip']) socket.on('uc:' + type, inRoom((p, d) => uc.action(p, type, d)));
 
   socket.on('disconnect', () => {
     const p = me();
-    if (!p) return;
-    leaveZone(p);
-    players.delete(socket.id);
-    io.emit('sprites', spriteMap());
+    if (!p || socket.data.replaced || p.socket !== socket) return;
+    p.online = false;
+    p.discAt = Date.now();
+    if (p.zone === 'city') city.remove(p);
+    if (p.zone === 'lobby') uc.watch(p, false);
+    if (p.zone === 'room') uc.onDisconnect(p);
   });
 });
 
-// ---------- 主迴圈：120Hz 處理移動，每秒廣播 40 次 ----------
-let last = Date.now(), lastSend = 0;
+// ---------- 主迴圈：120Hz 處理移動，城市每秒同步 25 次，房間每秒檢查 10 次 ----------
+let last = Date.now(), lastCity = 0, lastRoom = 0;
 setInterval(() => {
   const now = Date.now();
   const steps = (now - last) / 1000 / Move.STEP; last = now;
-  for (const w of Object.values(worlds)) w.tick(now, steps);
-  if (now - lastSend >= 1000 / 40 - 2) {
-    lastSend = now;
-    for (const w of Object.values(worlds)) w.broadcast(now);
+  city.tick(now, steps);
+  if (now - lastCity >= 40) { lastCity = now; city.broadcast(now); }
+  if (now - lastRoom >= 100) {
+    lastRoom = now;
+    // 斷線超過保留時間 → 離開房間（遊戲中視為棄權淘汰）並清除角色
+    for (const p of sessions.values()) {
+      if (p.online || now - p.discAt < HOLD_MS) continue;
+      if (p.roomCode) uc.removeMember(p, 'timeout');
+      sessions.delete(p.token); byId.delete(p.id);
+    }
+    uc.tick(now);
   }
 }, 1000 / 120);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`色塊人宇宙都市啟動：http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`色塊人城市啟動：http://localhost:${PORT}`));
