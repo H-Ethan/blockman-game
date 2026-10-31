@@ -2,448 +2,161 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>色塊人宇宙都市</title>
-<style>
-
-  :root { --bg:#f4f1ea; --ink:#222; --card:#fff; --line:#222; --accent:#ff5a5f; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: "Noto Sans TC", system-ui, sans-serif; background:var(--bg); color:var(--ink); }
-  header { padding:10px 16px; border-bottom:3px solid var(--line); background:var(--card); display:flex; align-items:center; gap:12px; }
-  header h1 { margin:0; font-size:22px; letter-spacing:1px; }
-  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
-  .card { background:var(--card); border:3px solid var(--line); padding:16px; }
-  .hidden { display:none !important; }
-  button { font:inherit; border:2px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
-  button:hover { background:#eee; }
-  button.primary { background:var(--accent); color:#fff; font-weight:bold; }
-  button.on { background:var(--ink); color:#fff; }
-  input[type=text] { font:inherit; border:2px solid var(--line); padding:8px; width:100%; }
-  .tabs { display:flex; gap:8px; margin-bottom:12px; }
-  .editor { display:grid; grid-template-columns: 1fr 260px; gap:16px; }
-  @media (max-width:760px){ .editor { grid-template-columns: 1fr; } }
-  .row { display:flex; align-items:center; gap:10px; margin:10px 0; flex-wrap:wrap; }
-  .row label { min-width:64px; font-weight:bold; }
-  input[type=color] { width:48px; height:36px; border:2px solid var(--line); padding:0; background:none; }
-  .preview { display:flex; flex-direction:column; align-items:center; gap:10px; }
-  .preview canvas { image-rendering: pixelated; border:3px solid var(--line); background:
-    repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/16px 16px; }
-  #drawCanvas { image-rendering: pixelated; border:3px solid var(--line); touch-action:none; cursor:crosshair; max-width:100%;
-    background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/40px 40px; }
-  .palette { display:flex; flex-wrap:wrap; gap:6px; }
-  .swatch { width:28px; height:28px; border:2px solid var(--line); cursor:pointer; }
-  .swatch.sel { outline:3px solid var(--accent); outline-offset:2px; }
-  .board li { display:flex; align-items:center; gap:8px; padding:4px 0; }
-  .board img { width:12px; height:24px; image-rendering:pixelated; }
-  .board ol { padding-left:20px; margin:8px 0; }
-  #chatLog { height:160px; overflow:auto; border:2px solid var(--line); padding:6px; font-size:14px; background:#fafafa; }
-  .pad { display:grid; grid-template-columns: repeat(3, 56px); gap:6px; justify-content:center; margin-top:12px; user-select:none; }
-  .pad button { height:56px; font-size:22px; touch-action:none; }
-  .hint { color:#666; font-size:14px; }
-  /* 兩層畫布：底層是靜態場景（只畫一次），上層每格只畫會動的東西 */
-  #stage { position:relative; width:100%; height:auto; display:block; background:transparent; }
-  #stageBg { position:absolute; left:0; top:0; width:100%; height:100%; display:block; }
-  /* 遊戲畫面：依視窗大小放到最大，側欄固定寬度 */
-  .wrap.wide { max-width:1720px; padding:10px 14px; }
-  .game { display:grid; grid-template-columns: minmax(0,1fr) 250px; gap:14px; align-items:start; }
-  @media (max-width:900px){ .game { grid-template-columns: 1fr; } }
-  .stage-wrap { position:relative; margin:0 auto; width:100%; border:3px solid var(--line); border-radius:6px; overflow:hidden; background:#101a26; }
-  .game .board { max-height:calc(100vh - 90px); overflow:auto; }
-  .game #chatLog { height:220px; }
-  /* 方向鍵只在觸控裝置顯示，疊在畫面左下角 */
-  .pad { display:none !important; }
-  @media (pointer:coarse) {
-    .pad { display:grid !important; position:absolute; left:10px; bottom:10px; margin:0; grid-template-columns:repeat(3,52px); opacity:.85; }
-    .pad button { height:52px; background:rgba(255,255,255,.88); border-radius:10px; }
-  }
-  #dgLobby .scene { width:min(100%, calc((100vh - 110px) * 1.6)); margin:0 auto; }
-  .room .scene { width:min(100%, calc((100vh - 230px) * 1.6)); margin:0 auto; }
-  .zone-title { margin:0 0 8px; font-size:18px; line-height:1.3; }
-  .zone-title small { display:block; font-weight:normal; color:#666; font-size:13px; margin-top:2px; }
-
-  /* ---------- 進入建築的轉場 ---------- */
-  #fade { position:fixed; inset:0; background:#1a1240; color:#fff; display:flex; align-items:center; justify-content:center;
-    font-size:28px; font-weight:900; letter-spacing:2px; opacity:0; pointer-events:none; transition:opacity .28s; z-index:50; }
-  #fade.show { opacity:1; }
-
-  /* ---------- 你畫我猜 ---------- */
-  .scene { position:relative; width:100%; aspect-ratio: 960 / 600; border:3px solid var(--line); border-radius:8px; overflow:hidden; background:#e2a96b; }
-  .scene > canvas.bg { position:absolute; inset:0; width:100%; height:100%; display:block; }
-  .lobby-panel { position:absolute; left:50%; top:52%; transform:translate(-50%,-50%); width:min(560px, 86%);
-    background:rgba(255,250,240,.96); border:3px solid #3b2414; border-radius:16px; padding:18px 18px 14px; box-shadow:0 8px 0 rgba(59,36,20,.35); }
-  .lobby-sign { position:absolute; left:50%; top:4%; transform:translateX(-50%); background:linear-gradient(#ff7b7b,#e8434b); color:#fff;
-    border:3px solid #2b1a10; border-radius:10px; padding:6px 22px; font-size:clamp(16px,2.6vw,26px); font-weight:900; letter-spacing:3px;
-    text-shadow:0 2px 0 #7a1d22; box-shadow:0 4px 0 #2b1a10; white-space:nowrap; }
-  .lobby-panel h2 { margin:0 0 4px; font-size:20px; text-align:center; }
-  .lobby-panel .sub { text-align:center; color:#7a5a3a; margin:0 0 12px; font-size:14px; }
-  .opts { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
-  @media (max-width:600px){ .opts { grid-template-columns: 1fr; } .lobby-panel { top:50%; padding:12px; } }
-  .opt { border:3px solid #3b2414; border-radius:12px; background:#fff; padding:12px 8px; text-align:center; cursor:pointer;
-    box-shadow:0 4px 0 #3b2414; transition: transform .08s, box-shadow .08s; }
-  .opt:hover { transform:translateY(-2px); box-shadow:0 6px 0 #3b2414; background:#fff; }
-  .opt:active { transform:translateY(3px); box-shadow:0 1px 0 #3b2414; }
-  .opt .ico { font-size:30px; display:block; }
-  .opt b { display:block; font-size:16px; margin:4px 0 2px; }
-  .opt span { font-size:12px; color:#6b5440; }
-  .opt.pub { background:#fff4d6; } .opt.rnd { background:#e0f2ff; } .opt.pri { background:#f1e6ff; }
-  .notice { margin-top:12px; border:2px dashed #b45309; background:#fff7e6; border-radius:10px; padding:10px; text-align:center; }
-  .notice p { margin:0 0 8px; font-weight:bold; color:#92400e; }
-  .private-box { margin-top:12px; border:2px solid #7c3aed; background:#faf5ff; border-radius:10px; padding:10px; display:grid; gap:8px; }
-  .private-box .join { display:flex; gap:8px; }
-  .private-box input { text-transform:uppercase; letter-spacing:6px; font-weight:900; text-align:center; font-size:20px; }
-  .lobby-foot { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; flex-wrap:wrap; }
-  .lobby-foot .hint { font-size:13px; }
-
-  .room { display:grid; grid-template-columns: minmax(0,1fr) 300px; gap:12px; }
-  @media (max-width:900px){ .room { grid-template-columns: 1fr; } }
-  .topbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:#fff; border:3px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; }
-  .badge { background:#fef3c7; border:2px solid #b45309; border-radius:999px; padding:3px 10px; font-size:14px; font-weight:bold; }
-  .badge.private { background:#f3e8ff; border-color:#7c3aed; }
-  .badge .code { letter-spacing:3px; font-size:17px; color:#6d28d9; }
-  button.mini { padding:2px 8px; font-size:12px; border-radius:6px; margin-left:6px; }
-  #dgRound { font-weight:bold; color:#475569; }
-  #dgWord { flex:1; display:flex; align-items:baseline; justify-content:center; gap:8px; flex-wrap:wrap; min-width:200px; }
-  #dgWord .lbl { color:#64748b; font-size:13px; }
-  #dgWord .hint { font-size:24px; letter-spacing:4px; }
-  #dgWord .answer { font-size:24px; color:#dc2626; letter-spacing:2px; }
-  #dgWord .answer.ok { color:#16a34a; }
-  #dgWord .cat { background:#e0f2fe; border-radius:6px; padding:1px 8px; font-size:13px; color:#0369a1; }
-  .timer { --p:360deg; width:48px; height:48px; border-radius:50%; display:grid; place-items:center;
-    background:conic-gradient(#22c55e var(--p), #e5e7eb 0); border:3px solid var(--line); }
-  .timer b { background:#fff; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-size:16px; }
-  .timer.urgent { background:conic-gradient(#ef4444 var(--p), #fee2e2 0); animation: shake .5s infinite; }
-  @keyframes shake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-6deg)} 75%{transform:rotate(6deg)} }
-
-  #dgBoard { position:absolute; left:26.0417%; top:11%; width:47.9167%; height:57.5%; background:#fff; touch-action:none; display:block; }
-  .board-ov { position:absolute; left:26.0417%; top:11%; width:47.9167%; height:57.5%; display:flex; align-items:center; justify-content:center;
-    background:rgba(255,248,235,.92); }
-  .board-ov.soft { background:rgba(255,248,235,.78); }
-  .ov-card { width:92%; max-height:96%; overflow:auto; text-align:center; padding:6px; }
-  .ov-card h3 { margin:2px 0 8px; font-size:clamp(15px,2vw,22px); }
-  .ov-card .sub { margin:4px 0; color:#7a5a3a; font-size:14px; }
-  .ov-card .why { margin:6px 0 0; color:#94a3b8; font-size:12px; }
-  .ov-card .invite { margin:6px 0; background:#f3e8ff; border-radius:8px; padding:6px; font-size:13px; color:#6d28d9; }
-  .settings { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0; }
-  .set { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#7a5a3a; }
-  .set select, .set b { font:inherit; font-size:15px; font-weight:bold; color:#222; border:2px solid var(--line); border-radius:8px; padding:5px; background:#fff; }
-  button.big { font-size:17px; font-weight:900; padding:10px 22px; border-radius:12px; box-shadow:0 4px 0 #222; margin-top:8px; }
-  button.big:active { transform:translateY(3px); box-shadow:0 1px 0 #222; }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  .ov-card .round-no { display:inline-block; background:#222; color:#ffe066; border-radius:999px; padding:2px 14px; font-weight:900; }
-  .ov-card .secret { font-size:clamp(28px,5vw,48px); font-weight:900; color:#dc2626; letter-spacing:4px; margin:4px 0; text-shadow:0 3px 0 #fde68a; }
-  .ov-card.intro h3 { font-size:clamp(20px,3vw,30px); }
-  .gains { list-style:none; padding:0; margin:8px auto; max-width:320px; text-align:left; }
-  .gains li { display:flex; justify-content:space-between; padding:3px 8px; border-bottom:1px dashed #e7d3b5; }
-  .gains .plus { color:#16a34a; } .gains .zero { color:#94a3b8; }
-  .podium { display:flex; justify-content:center; align-items:flex-end; gap:10px; margin:10px 0 6px; }
-  .pod { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:80px; }
-  .pod img { width:30px; height:60px; image-rendering:pixelated; margin-bottom:2px; }
-  .pod .step { width:100%; border:3px solid #222; border-radius:8px 8px 0 0; display:grid; place-items:center; font-size:22px; }
-  .pod.p1 .step { height:64px; background:#fde68a; } .pod.p2 .step { height:44px; background:#e5e7eb; } .pod.p3 .step { height:30px; background:#fed7aa; }
-  .row-btns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
-
-  .tools { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; background:#fff; border:3px solid var(--line); border-radius:10px; padding:8px; margin-top:10px; }
-  .tools.locked { opacity:.55; pointer-events:none; }
-  .tools .group { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
-  .tools .color { width:26px; height:26px; padding:0; border-radius:50%; border:2px solid #222; }
-  .tools .color.sel { outline:3px solid #ff5a5f; outline-offset:2px; }
-  .tools .size { width:34px; height:34px; padding:0; display:grid; place-items:center; border-radius:8px; }
-  .tools .size i { display:block; background:#222; border-radius:50%; }
-  .tools .size.sel { background:#fde68a; }
-  .tools button.on { background:#222; color:#fff; }
-  .spectate { text-align:center; color:#64748b; margin-top:10px; font-size:14px; }
-
-  .chat { background:#fff; border:3px solid var(--line); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px; min-height:0; }
-  #dgChatLog { flex:1; min-height:240px; max-height:480px; overflow:auto; border:2px solid #e5e7eb; border-radius:8px; padding:6px; font-size:14px; background:#fafafa; }
-  @media (max-width:900px){ #dgChatLog { max-height:200px; min-height:140px; } }
-  .msg { padding:2px 0; word-break:break-all; }
-  .msg.system { color:#64748b; font-size:13px; }
-  .msg.correct { color:#15803d; font-weight:900; background:#dcfce7; border-radius:6px; padding:3px 6px; margin:2px 0; }
-  .msg.close { color:#c2410c; font-weight:bold; }
-  .msg.private { color:#7c3aed; }
-  .chat .send { display:flex; gap:6px; }
-  .chat .send input { min-width:0; }
-  .chat .send button { white-space:nowrap; flex-shrink:0; }
-  #dgToast { position:fixed; left:50%; bottom:24px; transform:translate(-50%, 30px); background:#222; color:#fff; padding:10px 18px; border-radius:999px;
-    opacity:0; transition:.25s; pointer-events:none; z-index:60; font-weight:bold; }
-  #dgToast.show { opacity:1; transform:translate(-50%,0); }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2b2050">
+<title>色塊人城市</title>
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header><h1>■ 色塊人宇宙都市</h1><span class="hint" id="status">設計你的角色</span></header>
+<header class="topbar">
+  <div class="brand"><span class="logo">■</span>色塊人城市</div>
+  <div class="where" id="where">載入中</div>
+  <div class="top-actions">
+    <span class="net-dot" id="netDot" title="連線狀態"></span>
+    <button class="ghost-btn hidden" id="editBtn" title="修改角色">🎨 <span class="lbl">修改角色</span></button>
+    <button class="ghost-btn" id="qualityBtn" title="畫質">✨ <span class="lbl" id="qualityLbl">畫質：高</span></button>
+  </div>
+</header>
 
-<!-- ===== 角色編輯器 ===== -->
-<div class="wrap" id="editorScreen">
-  <div class="card">
-    <div class="tabs">
-      <button id="tabBlock" class="on">色塊模式</button>
-      <button id="tabDraw">手繪模式</button>
+<main>
+  <!-- ===== 載入中 ===== -->
+  <section class="screen" id="scrBoot">
+    <div class="boot">
+      <div class="boot-logo"><span></span><span></span><span></span></div>
+      <p id="bootText">正在連線到色塊人城市…</p>
     </div>
-    <div class="editor">
-      <div>
-        <!-- 色塊模式 -->
-        <div id="blockPanel">
-          <div class="row"><label>頭</label><input type="color" id="cHead" value="#f9c78d">
-            <span class="hint">髮色</span><input type="color" id="cHair" value="#222222">
-            <input type="checkbox" id="hasHair" checked><span class="hint">顯示頭髮</span></div>
-          <div class="row"><label>身體</label><input type="color" id="cBody" value="#ff5a5f">
-            <span class="hint">條紋</span><input type="color" id="cStripe" value="#ffffff">
-            <input type="checkbox" id="hasStripe"><span class="hint">顯示條紋</span></div>
-          <div class="row"><label>腳</label><input type="color" id="cFeet" value="#2b59c3">
-            <span class="hint">鞋子</span><input type="color" id="cShoe" value="#222222"></div>
-          <div class="row"><label>頭部比例</label><input type="range" id="rHead" min="6" max="18" value="11"></div>
-          <div class="row"><label>腳部比例</label><input type="range" id="rFeet" min="4" max="20" value="12"></div>
-          <div class="row"><button id="randomBtn">🎲 隨機</button></div>
-        </div>
-        <!-- 手繪模式 -->
-        <div id="drawPanel" class="hidden">
-          <div class="row">
-            <div class="palette" id="palette"></div>
-            <input type="color" id="customColor" value="#8a5cf6" title="自訂顏色">
+  </section>
+
+  <!-- ===== 角色建立 ===== -->
+  <section class="screen hidden" id="scrCreator">
+    <div class="creator">
+      <div class="creator-preview">
+        <h2 id="creatorTitle">建立你的色塊人</h2>
+        <div class="preview-box">
+          <canvas id="previewCanvas"></canvas>
+          <div class="preview-ctrl">
+            <button class="round-btn" id="rotL" aria-label="向左轉">⟲</button>
+            <button class="chip" id="walkToggle">🚶 走路預覽</button>
+            <button class="round-btn" id="rotR" aria-label="向右轉">⟳</button>
           </div>
-          <div class="row">
-            <button id="toolPen" class="on">✏️ 畫筆</button>
-            <button id="toolEraser">🧽 橡皮擦</button>
-            <button id="toolFill">🪣 填滿</button>
-            <button id="importBlock">從色塊模式匯入</button>
-            <button id="clearDraw">清空</button>
-          </div>
-          <canvas id="drawCanvas" width="240" height="480"></canvas>
-          <p class="hint">12 × 24 像素畫布，畫好後右側即時預覽。</p>
         </div>
       </div>
-      <div class="preview">
-        <canvas id="previewCanvas" width="24" height="48" style="width:96px;height:192px"></canvas>
-        <input type="text" id="nameInput" maxlength="12" placeholder="輸入暱稱">
-        <button class="primary" id="joinBtn" style="width:100%">進入宇宙都市 ▶</button>
-        <p class="hint">方向鍵 / WASD 移動，走進建築物就能玩遊戲！</p>
+      <div class="creator-form">
+        <label class="field"><span>暱稱 <small>（1～10 個字）</small></span>
+          <input type="text" id="nameInput" maxlength="10" placeholder="輸入你的暱稱" autocomplete="off"></label>
+        <div class="field"><span>身體主色</span><div class="swatches" id="swBody"></div></div>
+        <div class="field"><span>配色 <small>（腳、帽子、條紋）</small></span><div class="swatches" id="swAccent"></div></div>
+        <div class="field two">
+          <div><span>膚色</span><div class="swatches" id="swSkin"></div></div>
+          <div><span>髮色</span><div class="swatches" id="swHair"></div></div>
+        </div>
+        <div class="field"><span>表情</span><div class="chips" id="chExpr"></div></div>
+        <div class="field"><span>帽子</span><div class="chips" id="chHat"></div></div>
+        <div class="field"><span>眼鏡</span><div class="chips" id="chGlasses"></div></div>
+        <p class="form-error" id="creatorError"></p>
+        <div class="creator-actions">
+          <button class="btn" id="randomBtn">🎲 隨機</button>
+          <button class="btn hidden" id="cancelEditBtn">取消</button>
+          <button class="btn primary big" id="enterBtn">進入城市 ▶</button>
+        </div>
+        <p class="hint">角色會保存在這台裝置上，下次進來可以直接沿用，也能在城市裡隨時修改。</p>
       </div>
     </div>
-  </div>
-</div>
+  </section>
 
-<!-- ===== 可走動的場景（廣場、搶星星草原） ===== -->
-<div class="wrap wide hidden" id="gameScreen">
-  <div class="game">
-    <div class="stage-wrap" id="stageWrap">
-      <canvas id="stageBg" width="960" height="726"></canvas>
-      <canvas id="stage" width="960" height="726"></canvas>
-      <div class="pad" id="pad">
-        <span></span><button data-k="up">▲</button><span></span>
-        <button data-k="left">◀</button><button data-k="down">▼</button><button data-k="right">▶</button>
+  <!-- ===== 城市 ===== -->
+  <section class="screen hidden" id="scrCity">
+    <div class="city-stage">
+      <canvas id="cityCanvas"></canvas>
+      <div class="city-tip" id="cityTip"><b>WASD / 方向鍵</b> 移動　<b>Enter</b> 聊天　走進發光的門口就能進入建築</div>
+      <div class="near-tip hidden" id="nearTip"></div>
+      <div class="joy" id="joy" aria-label="虛擬搖桿"><div class="knob" id="joyKnob"></div></div>
+      <div class="city-chat" id="cityChat">
+        <div class="mini-log" id="cityLog"></div>
+        <form class="chat-row" id="cityForm" autocomplete="off">
+          <input type="text" id="cityInput" maxlength="60" placeholder="按 Enter 說話（城市聊天）">
+          <button class="btn small" type="submit">送出</button>
+        </form>
       </div>
     </div>
-    <div class="card board">
-      <h2 class="zone-title" id="zoneTitle">宇宙廣場</h2>
-      <strong id="listTitle">在線玩家</strong>
-      <ol id="scoreList"></ol>
-      <strong>聊天</strong>
-      <div id="chatLog"></div>
-      <input type="text" id="chatInput" maxlength="80" placeholder="按 Enter 送出">
-      <button id="plazaBtn" class="hidden" style="margin-top:10px;width:100%">🏙️ 返回廣場</button>
-      <button id="backBtn" style="margin-top:10px;width:100%">換角色</button>
-    </div>
-  </div>
-</div>
+  </section>
 
-<!-- ===== 你畫我猜：大廳 ===== -->
-<div class="wrap wide hidden" id="dgLobby">
-  <div class="scene">
-    <canvas class="bg" id="lobbyBg"></canvas>
-    <div class="lobby-sign">🎨 你畫我猜</div>
-    <div class="lobby-panel">
-      <h2>歡迎來到畫室！</h2>
-      <p class="sub">一人畫、大家猜，畫得像、猜得快就能得分</p>
-      <div class="opts">
-        <button class="opt pub" id="dgCreatePublic"><span class="ico">🏠</span><b>建立公開房間</b><span>自己開房，其他人可以隨機配對加入</span></button>
-        <button class="opt rnd" id="dgRandom"><span class="ico">🎲</span><b>隨機加入</b><span>自動加入有空位、還沒開始的公開房間</span></button>
-        <button class="opt pri" id="dgPrivate"><span class="ico">🔒</span><b>私人房間</b><span>建立有代碼的房間，或輸入代碼找朋友</span></button>
-      </div>
-      <div class="notice hidden" id="dgNone">
-        <p>目前沒有可加入的房間</p>
-        <button class="primary" id="dgNoneCreate">🏠 建立公開房間</button>
-      </div>
-      <div class="private-box hidden" id="dgPrivatePanel">
-        <button class="primary" id="dgCreatePrivate">🔒 建立私人房間（取得代碼）</button>
-        <div class="join"><input type="text" id="dgCodeInput" maxlength="4" placeholder="代碼" autocomplete="off"><button id="dgJoinCode">加入</button></div>
-      </div>
-      <div class="lobby-foot">
-        <span class="hint" id="dgOpenCount"></span>
-        <button id="dgExit">← 走出建築，回到廣場</button>
+  <!-- ===== 誰是臥底：大廳 ===== -->
+  <section class="screen hidden" id="scrLobby">
+    <div class="lobby">
+      <canvas id="lobbyCanvas"></canvas>
+      <div class="lobby-panel">
+        <div class="lobby-head">
+          <h2>🔍 誰是臥底 <small>遊戲大廳</small></h2>
+          <button class="link-btn" id="lobbyRules">📖 規則說明</button>
+        </div>
+        <div class="lobby-tabs" role="tablist">
+          <button class="tab" data-tab="create">🏠<b>建立房間</b></button>
+          <button class="tab" data-tab="list">📋<b>瀏覽公開房間</b></button>
+          <button class="tab" data-tab="random">🎲<b>隨機加入</b></button>
+          <button class="tab" data-tab="code">🔑<b>輸入房間代碼</b></button>
+        </div>
+        <div class="lobby-body" id="lobbyBody"></div>
+        <div class="lobby-foot"><button class="btn" id="lobbyExit">← 走出建築，回到城市</button></div>
       </div>
     </div>
-  </div>
-</div>
+  </section>
 
-<!-- ===== 你畫我猜：房間 ===== -->
-<div class="wrap wide hidden" id="dgRoom">
-  <div class="topbar">
-    <span id="dgRoomBadge"></span>
-    <span id="dgRound"></span>
-    <div id="dgWord"></div>
-    <div class="timer hidden" id="dgTimer"><b>0</b></div>
-  </div>
-  <div class="room">
-    <div>
-      <div class="scene">
-        <canvas class="bg" id="roomBg"></canvas>
-        <canvas id="dgBoard"></canvas>
-        <div class="board-ov hidden" id="dgOverlay"></div>
+  <!-- ===== 誰是臥底：房間 ===== -->
+  <section class="screen hidden" id="scrRoom">
+    <div class="room">
+      <div class="room-main">
+        <div class="room-top">
+          <div class="room-title"><b id="rName"></b><span class="code-chip" id="rCode" title="點一下複製房間代碼"></span><span class="tag lock hidden" id="rLock">🔒<span class="lbl"> 密碼房</span></span></div>
+          <div class="room-phase"><span id="rPhase"></span><span class="round" id="rRound"></span></div>
+          <div class="timer hidden" id="rTimer"><b>0</b></div>
+          <div class="room-btns"><button class="ghost-btn dark" id="rRules">📖 <span class="lbl">規則</span></button><button class="ghost-btn dark hidden" id="rSettingsBtn">⚙️ <span class="lbl">設定</span></button><button class="side-toggle" id="rSideToggle">💬 紀錄<span class="dot hidden" id="rSideDot"></span></button></div>
+        </div>
+        <div class="room-stage">
+          <canvas id="roomCanvas"></canvas>
+          <div class="stage-banner hidden" id="rBanner"></div>
+        </div>
+        <div class="action" id="rAction"></div>
       </div>
-      <div class="tools hidden" id="dgTools">
-        <div class="group" id="dgColors"></div>
-        <div class="group" id="dgSizes"></div>
-        <div class="group"><button id="dgPen">✏️ 畫筆</button><button id="dgEraser">🧽 橡皮擦</button></div>
-        <div class="group"><button id="dgUndo">↩️ 復原</button><button id="dgClear">🗑️ 清空</button></div>
-      </div>
-      <p class="spectate hidden" id="dgSpectate">👀 看畫板猜答案，在右邊輸入框搶答！</p>
+      <aside class="room-side" id="rSide">
+        <div class="side-head">
+          <div class="log-tabs" id="logTabs">
+            <button class="on" data-f="all">全部</button><button data-f="desc">描述</button><button data-f="sys">系統</button>
+          </div>
+          <button class="side-close" id="rSideClose" aria-label="收合">✕</button>
+        </div>
+        <div class="log" id="rLog"></div>
+        <button class="new-pill hidden" id="rNewPill">⬇ 有新訊息</button>
+        <form class="chat-row" id="rChatForm" autocomplete="off">
+          <span class="chan" id="rChan">聊天</span>
+          <input type="text" id="rChatInput" maxlength="60" placeholder="輸入訊息">
+          <button class="btn small" type="submit">送出</button>
+        </form>
+        <p class="chat-hint" id="rChatHint"></p>
+      </aside>
     </div>
-    <div class="chat">
-      <strong>💬 猜題區</strong>
-      <div id="dgChatLog"></div>
-      <div class="send"><input type="text" id="dgInput" maxlength="40" autocomplete="off"><button id="dgSend" class="primary">送出</button></div>
-      <button id="dgLeave">🚪 離開房間（回大廳）</button>
-    </div>
-  </div>
-</div>
+    <div class="result hidden" id="rResult"></div>
+  </section>
+</main>
 
+<div class="banner hidden" id="netBanner"></div>
 <div id="fade"></div>
-<div id="dgToast"></div>
+<div id="toast"></div>
+<div class="modal hidden" id="modal"><div class="modal-card"><button class="modal-x" id="modalX" aria-label="關閉">✕</button><div id="modalBody"></div></div></div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="shared.js"></script>
-<script src="props.js"></script>
-<script src="studio.js"></script>
-<script src="game.js"></script>
-<script src="dg.js"></script>
-<script>
-const $ = id => document.getElementById(id);
-const SW = 24, SH = 48;          // 角色圖尺寸
-const GW = 12, GH = 24;          // 手繪格數（每格 2×2 像素）
-let mode = 'block';
-
-// ---------- 色塊模式 ----------
-function renderBlock(ctx) {
-  ctx.clearRect(0, 0, SW, SH);
-  const headH = +$('rHead').value, feetH = +$('rFeet').value;
-  const bodyH = SH - headH - feetH;
-  const x = 2, w = SW - 4;
-  // 頭
-  ctx.fillStyle = $('cHead').value; ctx.fillRect(x, 0, w, headH);
-  if ($('hasHair').checked) { ctx.fillStyle = $('cHair').value; ctx.fillRect(x, 0, w, Math.max(2, Math.round(headH * 0.3))); }
-  // 身體
-  ctx.fillStyle = $('cBody').value; ctx.fillRect(x, headH, w, bodyH);
-  if ($('hasStripe').checked) { ctx.fillStyle = $('cStripe').value; ctx.fillRect(x, headH + Math.floor(bodyH / 2) - 1, w, 3); }
-  // 腳
-  ctx.fillStyle = $('cFeet').value; ctx.fillRect(x, headH + bodyH, w, feetH);
-  ctx.fillStyle = $('cShoe').value; ctx.fillRect(x, SH - 3, w, 3);
-  // 外框
-  ctx.fillStyle = '#222';
-  ctx.fillRect(x - 1, 0, 1, SH); ctx.fillRect(x + w, 0, 1, SH);
-}
-document.querySelectorAll('#blockPanel input').forEach(el => el.addEventListener('input', updatePreview));
-const rndColor = () => '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
-$('randomBtn').onclick = () => {
-  ['cHair', 'cBody', 'cStripe', 'cFeet', 'cShoe'].forEach(id => $(id).value = rndColor());
-  $('cHead').value = ['#f9c78d', '#e8b07a', '#c68642', '#8d5524', '#ffdbac'][Math.floor(Math.random() * 5)];
-  $('hasStripe').checked = Math.random() < 0.5;
-  $('rHead').value = 7 + Math.floor(Math.random() * 10);
-  $('rFeet').value = 5 + Math.floor(Math.random() * 14);
-  updatePreview();
-};
-
-// ---------- 手繪模式 ----------
-const grid = Array.from({ length: GH }, () => Array(GW).fill(null));
-const COLORS = ['#222222', '#ffffff', '#f9c78d', '#8d5524', '#ff5a5f', '#ff9f1c', '#ffe066', '#7bd389',
-                '#2a9d8f', '#4cc9f0', '#2b59c3', '#8a5cf6', '#ff8fab', '#6b4f3a', '#9e9e9e', '#1b5e20'];
-let curColor = COLORS[4], tool = 'pen', painting = false;
-const dc = $('drawCanvas'), dctx = dc.getContext('2d');
-const CELL = dc.width / GW;
-
-COLORS.forEach(c => {
-  const s = document.createElement('div');
-  s.className = 'swatch' + (c === curColor ? ' sel' : ''); s.style.background = c;
-  s.onclick = () => { curColor = c; selectTool('pen'); markSwatch(s); };
-  $('palette').appendChild(s);
-});
-function markSwatch(el) { document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('sel', s === el)); }
-$('customColor').oninput = e => { curColor = e.target.value; selectTool('pen'); markSwatch(null); };
-function selectTool(t) { tool = t; ['Pen', 'Eraser', 'Fill'].forEach(n => $('tool' + n).classList.toggle('on', t === n.toLowerCase())); }
-$('toolPen').onclick = () => selectTool('pen');
-$('toolEraser').onclick = () => selectTool('eraser');
-$('toolFill').onclick = () => selectTool('fill');
-$('clearDraw').onclick = () => { grid.forEach(r => r.fill(null)); redrawGrid(); };
-$('importBlock').onclick = () => {
-  const c = document.createElement('canvas'); c.width = SW; c.height = SH;
-  const cx = c.getContext('2d'); renderBlock(cx);
-  const d = cx.getImageData(0, 0, SW, SH).data;
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-    const i = ((y * 2) * SW + x * 2) * 4;
-    grid[y][x] = d[i + 3] > 0 ? '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('') : null;
-  }
-  redrawGrid();
-};
-
-function redrawGrid() {
-  dctx.clearRect(0, 0, dc.width, dc.height);
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-    if (grid[y][x]) { dctx.fillStyle = grid[y][x]; dctx.fillRect(x * CELL, y * CELL, CELL, CELL); }
-  }
-  dctx.strokeStyle = 'rgba(0,0,0,.12)';
-  for (let x = 0; x <= GW; x++) { dctx.beginPath(); dctx.moveTo(x * CELL, 0); dctx.lineTo(x * CELL, dc.height); dctx.stroke(); }
-  for (let y = 0; y <= GH; y++) { dctx.beginPath(); dctx.moveTo(0, y * CELL); dctx.lineTo(dc.width, y * CELL); dctx.stroke(); }
-  updatePreview();
-}
-function floodFill(sx, sy, color) {
-  const target = grid[sy][sx]; if (target === color) return;
-  const stack = [[sx, sy]];
-  while (stack.length) {
-    const [x, y] = stack.pop();
-    if (x < 0 || y < 0 || x >= GW || y >= GH || grid[y][x] !== target) continue;
-    grid[y][x] = color; stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-  }
-}
-function paintAt(e) {
-  const r = dc.getBoundingClientRect();
-  const x = Math.floor((e.clientX - r.left) / r.width * GW), y = Math.floor((e.clientY - r.top) / r.height * GH);
-  if (x < 0 || y < 0 || x >= GW || y >= GH) return;
-  if (tool === 'fill') floodFill(x, y, curColor);
-  else grid[y][x] = tool === 'eraser' ? null : curColor;
-  redrawGrid();
-}
-dc.addEventListener('pointerdown', e => { painting = tool !== 'fill'; dc.setPointerCapture(e.pointerId); paintAt(e); });
-dc.addEventListener('pointermove', e => { if (painting) paintAt(e); });
-dc.addEventListener('pointerup', () => painting = false);
-
-function renderDraw(ctx) {
-  ctx.clearRect(0, 0, SW, SH);
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-    if (grid[y][x]) { ctx.fillStyle = grid[y][x]; ctx.fillRect(x * 2, y * 2, 2, 2); }
-  }
-}
-
-// ---------- 預覽 / 模式切換 ----------
-const pctx = $('previewCanvas').getContext('2d');
-function updatePreview() { mode === 'block' ? renderBlock(pctx) : renderDraw(pctx); }
-function setMode(m) {
-  mode = m;
-  $('tabBlock').classList.toggle('on', m === 'block'); $('tabDraw').classList.toggle('on', m === 'draw');
-  $('blockPanel').classList.toggle('hidden', m !== 'block'); $('drawPanel').classList.toggle('hidden', m !== 'draw');
-  if (m === 'draw' && grid.every(r => r.every(c => !c))) $('importBlock').onclick(); else updatePreview();
-}
-$('tabBlock').onclick = () => setMode('block');
-$('tabDraw').onclick = () => setMode('draw');
-redrawGrid(); setMode('block');
-try { $('nameInput').value = localStorage.getItem('bm_name') || ''; } catch (e) {}
-
-// 輸出角色圖給 app.js
-window.makeSprite = () => {
-  if (mode === 'draw' && grid.every(r => r.every(c => !c))) { alert('角色是空白的，先畫點東西吧！'); return null; }
-  const c = document.createElement('canvas'); c.width = SW; c.height = SH;
-  mode === 'block' ? renderBlock(c.getContext('2d')) : renderDraw(c.getContext('2d'));
-  return c.toDataURL('image/png');
-};
-</script>
-<script src="app.js"></script>
+<script src="js/shared/move.js"></script>
+<script src="js/shared/citymap.js"></script>
+<script src="js/shared/uc-rules.js"></script>
+<script src="js/iso.js"></script>
+<script src="js/avatar.js"></script>
+<script src="js/props.js"></script>
+<script src="js/bubbles.js"></script>
+<script src="js/city.js"></script>
+<script src="js/roomscene.js"></script>
+<script src="js/ui-common.js"></script>
+<script src="js/ui-lobby.js"></script>
+<script src="js/ui-room.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

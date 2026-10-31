@@ -1,13 +1,20 @@
 {
-  "name": "blockman-multiplayer",
-  "version": "1.0.0",
-  "description": "色塊人多人連線網頁遊戲",
+  "name": "blockman-city",
+  "version": "2.0.0",
+  "description": "色塊人城市：多人連線桌遊城市（第一棟：誰是臥底）",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run.js"
   },
   "dependencies": {
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

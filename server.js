@@ -74,7 +74,7 @@ function resume(p) {
   p.socket.emit('session', { id: p.id, profile: p.profile });
   if (p.zone === 'room' && uc.onReconnect(p)) { setZone(p, 'room'); uc.flush(); return; }
   if (p.zone === 'lobby') return enterLobby(p);
-  enterCity(p, p.cityPos);
+  enterCity(p, p.zone === 'city' && p.c ? { x: p.c.x, y: p.c.y } : p.cityPos);
 }
 
 io.on('connection', socket => {
