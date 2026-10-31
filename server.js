@@ -1,12 +1,13 @@
 // 色塊人宇宙都市 - 伺服器
-// 區域：宇宙廣場（plaza）→ 走進建築 → 你畫我猜（dg）／搶星星草原（stars）
+// 區域：宇宙廣場（plaza）。城市重新規劃中，目前廣場上沒有遊戲建築；
+// 你畫我猜（dg）的遊戲程式仍保留，之後蓋好新建築、加上入口就能再接上
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const Move = require('./public/shared.js');
 const World = require('./server/world');
 const DrawGuess = require('./server/drawguess');
-const { PLAZA_W, PLAZA_H, plazaMap, meadowMap } = require('./server/maps');
+const { PLAZA_W, PLAZA_H, plazaMap } = require('./server/maps');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,40 +22,12 @@ const plaza = new World(io, {
   init(w) { Object.assign(w, plazaMap()); },
   onPortal(p, portal) {
     if (portal.id === 'drawguess') enterDrawGuess(p);
-    else if (portal.id === 'stars') enterWorld(p, stars);
   },
 });
-const exitOf = id => plaza.portals.find(p => p.id === id).exit;
+const PLAZA_SPAWN = { x: 480, y: 520, facing: 1 };
+const exitOf = id => { const po = plaza.portals.find(p => p.id === id); return po ? po.exit : PLAZA_SPAWN; };
 
-// ---------- 搶星星草原 ----------
-const STAR_COUNT = 4, PICK_R = 22, WIN_SCORE = 10;
-const rid = () => Math.random().toString(36).slice(2, 9);
-const spawnStar = w => { const s = w.freeSpot(14); return { id: rid(), x: Math.round(s.x), y: Math.round(s.y) }; };
-function resetStars(w) {
-  w.obstacles = meadowMap(w.W, w.H);
-  w.stars = Array.from({ length: STAR_COUNT }, () => spawnStar(w));
-  w.winner = null;
-  for (const p of w.players.values()) Object.assign(p, w.freeSpot(), { vx: 0, vy: 0, score: 0, queue: [] });
-  w.sendMap();
-}
-const stars = new World(io, {
-  id: 'stars', title: '搶星星草原', W: 960, H: 600, theme: 'meadow', extraCfg: { WIN_SCORE },
-  init: resetStars,
-  onAdd(w, p) { p.score = 0; },
-  afterStep(w, p, now) {
-    for (let i = 0; i < w.stars.length; i++) {
-      const s = w.stars[i];
-      if (Math.hypot(s.x - p.x, s.y - p.y) < PICK_R) {
-        p.score++;
-        w.stars[i] = spawnStar(w);
-        if (p.score >= WIN_SCORE && !w.winner) { w.winner = p.name; w.resetAt = now + 4000; }
-      }
-    }
-  },
-  tick(w, now) { if (w.winner && now > w.resetAt) resetStars(w); },
-});
-
-const worlds = { plaza, stars };
+const worlds = { plaza };
 
 // ---------- 你畫我猜 ----------
 const dg = new DrawGuess(io, {});
@@ -104,7 +77,7 @@ io.on('connection', socket => {
   socket.on('toPlaza', () => {
     const p = me(); if (!p || p.zone === 'plaza') return;
     const from = p.zone;
-    enterWorld(p, plaza, exitOf(from === 'dg' ? 'drawguess' : 'stars'));
+    enterWorld(p, plaza, exitOf(from === 'dg' ? 'drawguess' : from));
   });
 
   socket.on('chat', text => {

@@ -345,9 +345,6 @@
     const paved = new Path2D();
     const roundRect = (x, y, w, h, rad) => { paved.moveTo(x + rad, y); paved.arcTo(x + w, y, x + w, y + h, rad); paved.arcTo(x + w, y + h, x, y + h, rad); paved.arcTo(x, y + h, x, y, rad); paved.arcTo(x, y, x + w, y, rad); paved.closePath(); };
     roundRect(110, top + 214, 740, 362, 46);   // 中央廣場
-    roundRect(426, top + 186, 108, 60, 10);    // 往你畫我猜
-    roundRect(122, top + 160, 96, 80, 10);     // 往搶星星草原
-    roundRect(750, top + 186, 100, 60, 10);    // 往建設中空地
     g.save(); g.clip(paved);
     g.fillStyle = '#e7dccb'; g.fillRect(0, top, W, H);
     const T = 24;
@@ -376,7 +373,6 @@
         g.fillStyle = ['#ff5a5f', '#ffd23f', '#ff8fab', '#ffffff', '#a855f7'][i % 5]; circle(g, x + 5 + i * 7, top + y + 4.5, 2);
       }
     };
-    bed(360, 206, 76); bed(524, 206, 76);
   }
 
   window.Props = { scale: 3, drawGuessBuilding, pillar, starGate, lot, fountain, bench, lamp, plazaGround, outlineText, rr, FONT };

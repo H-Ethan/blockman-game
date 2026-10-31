@@ -38,9 +38,9 @@
         DG.hide(); show('gameScreen'); boardKey = '';
         $('chatLog').innerHTML = '';
         $('zoneTitle').innerHTML = '';
-        $('zoneTitle').append(z.cfg.world === 'plaza' ? '🏙️ ' : '⭐ ', z.cfg.title);
+        $('zoneTitle').append('🏙️ ', z.cfg.title);
         const small = document.createElement('small');
-        small.textContent = z.cfg.world === 'plaza' ? '走進發光的入口就能進入遊戲' : `先搶到 ${z.cfg.WIN_SCORE} 顆星星獲勝`;
+        small.textContent = z.cfg.world === 'plaza' ? '城市重新規劃中，新建築即將登場' : '';
         $('zoneTitle').append(small);
         $('listTitle').textContent = z.cfg.world === 'plaza' ? '在線玩家' : '排行榜';
         $('plazaBtn').classList.toggle('hidden', z.cfg.world === 'plaza');
@@ -115,7 +115,7 @@
       const im = li.firstChild, sp = sprites[p.id];
       if (sp && im._src !== sp.sprite) { im._src = sp.sprite; im.src = sp.sprite; }
       const nm = sp ? sp.name : '?';
-      li.lastChild.textContent = `${nm}${p.id === myId ? '（你）' : ''}${zone === 'stars' ? ' — ' + p.score : ''}`;
+      li.lastChild.textContent = `${nm}${p.id === myId ? '（你）' : ''}`;
       if (ol.children[i] !== li) ol.insertBefore(li, ol.children[i] || null);
     });
   }
